@@ -8,38 +8,43 @@ class ManagementScene:
     CONTRACT_VISIBLE_ROWS = 4
     ROSTER_VISIBLE_ROWS = 4
 
-    CONTRACT_ROW_START_Y = 170
     CONTRACT_ROW_SPACING = 66
-
-    ROSTER_ROW_START_Y = 170
     ROSTER_ROW_SPACING = 50
 
-    def __init__(self, state):
+    SCROLLBAR_WIDTH = 8
+    SCROLLBAR_MARGIN = 14
+
+    def __init__(self, state, on_return_to_hub, on_save_game):
         self.state = state
+        self.on_return_to_hub = on_return_to_hub
+        self.on_save_game = on_save_game
 
         self.font = pygame.font.SysFont(None, 22)
         self.title_font = pygame.font.SysFont(None, 28)
-        self.header_font = pygame.font.SysFont(None, 32)
+        self.header_font = pygame.font.SysFont(None, 30)
 
         self.mouse_pos = (0, 0)
-
         self.selected_hero = None
         self.selected_source = ""
 
         self.contract_scroll = 0
         self.roster_scroll = 0
+        self.status_message = "Guild screen active."
 
         self.header_panel = Panel((20, 16, 1240, 86), "Guild Office")
         self.contracts_panel = Panel((20, 120, 740, 360), "Available Contracts")
         self.roster_panel = Panel((780, 120, 480, 360), "Roster")
         self.details_panel = Panel((20, 500, 1240, 180), "Selected Hero Details")
 
+        self.contract_row_start_y = self.contracts_panel.rect.y + 60
+        self.roster_row_start_y = self.roster_panel.rect.y + 60
+
     def hire_hero(self, hero):
         if hero not in self.state.available_contracts:
             return
 
         if self.state.gold < hero.signing_bonus:
-            print(f"Not enough gold for {hero.name}")
+            self.status_message = f"Not enough gold for {hero.name}"
             return
 
         self.state.gold -= hero.signing_bonus
@@ -54,17 +59,33 @@ class ManagementScene:
 
         self.selected_hero = hero
         self.selected_source = "Roster"
-
-        print(f"Hired {hero.name}")
+        self.status_message = f"Hired {hero.name}"
 
     def hire_selected_hero(self):
-        if self.selected_hero is None:
+        if self.selected_hero is not None and self.selected_source == "Contract":
+            self.hire_hero(self.selected_hero)
+
+    def release_hero(self, hero):
+        if hero not in self.state.roster:
             return
 
-        if self.selected_source != "Contract":
-            return
+        self.state.roster.remove(hero)
 
-        self.hire_hero(self.selected_hero)
+        self.roster_scroll = self.clamp_scroll(
+            self.roster_scroll,
+            len(self.state.roster),
+            self.ROSTER_VISIBLE_ROWS,
+        )
+
+        if self.selected_hero is hero:
+            self.selected_hero = None
+            self.selected_source = ""
+
+        self.status_message = f"Released {hero.name}"
+
+    def release_selected_hero(self):
+        if self.selected_hero is not None and self.selected_source == "Roster":
+            self.release_hero(self.selected_hero)
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -132,19 +153,25 @@ class ManagementScene:
 
         screen.blit(self.header_font.render(stats, True, (235, 235, 240)), (40, 56))
 
+        if self.status_message:
+            screen.blit(
+                self.font.render(self.status_message, True, (180, 200, 230)),
+                (740, 82),
+            )
+
     def draw_contracts(self, screen):
-        y = self.CONTRACT_ROW_START_Y
+        y = self.contract_row_start_y
 
         for hero in self.visible_contracts():
             self.draw_contract_row(screen, hero, y)
             y += self.CONTRACT_ROW_SPACING
 
-        self.draw_scroll_hint(
-            screen,
-            self.contracts_panel,
-            self.contract_scroll,
-            len(self.state.available_contracts),
-            self.CONTRACT_VISIBLE_ROWS,
+        self.draw_scrollbar(
+            screen=screen,
+            panel=self.contracts_panel,
+            scroll=self.contract_scroll,
+            item_count=len(self.state.available_contracts),
+            visible_count=self.CONTRACT_VISIBLE_ROWS,
         )
 
     def draw_contract_row(self, screen, hero, y):
@@ -174,31 +201,35 @@ class ManagementScene:
             f"Sign {hero.signing_bonus}g | Wage {hero.wage_per_year}g/y"
         )
 
-        name_color = (250, 250, 255) if is_hovered or is_selected else (235, 235, 240)
-        stat_color = (205, 205, 220) if is_hovered or is_selected else (190, 190, 200)
-
-        screen.blit(self.font.render(name_line, True, name_color), (50, y))
-        screen.blit(self.font.render(stat_line, True, stat_color), (50, y + 20))
+        screen.blit(self.font.render(name_line, True, (235, 235, 240)), (50, y))
+        screen.blit(self.font.render(stat_line, True, (190, 190, 200)), (50, y + 20))
 
     def draw_roster(self, screen):
         if not self.state.roster:
             screen.blit(
                 self.font.render("No heroes hired yet.", True, (180, 180, 190)),
-                (800, 170),
+                (800, self.roster_row_start_y),
+            )
+            self.draw_scrollbar(
+                screen=screen,
+                panel=self.roster_panel,
+                scroll=self.roster_scroll,
+                item_count=len(self.state.roster),
+                visible_count=self.ROSTER_VISIBLE_ROWS,
             )
             return
 
-        y = self.ROSTER_ROW_START_Y
+        y = self.roster_row_start_y
         for hero in self.visible_roster():
             self.draw_roster_row(screen, hero, y)
             y += self.ROSTER_ROW_SPACING
 
-        self.draw_scroll_hint(
-            screen,
-            self.roster_panel,
-            self.roster_scroll,
-            len(self.state.roster),
-            self.ROSTER_VISIBLE_ROWS,
+        self.draw_scrollbar(
+            screen=screen,
+            panel=self.roster_panel,
+            scroll=self.roster_scroll,
+            item_count=len(self.state.roster),
+            visible_count=self.ROSTER_VISIBLE_ROWS,
         )
 
     def draw_roster_row(self, screen, hero, y):
@@ -223,9 +254,7 @@ class ManagementScene:
         pygame.draw.rect(screen, border_color, row_rect, border_width, border_radius=8)
 
         line = f"{hero.name} | {hero.hero_class} | Lv {hero.level} | Pwr {hero.combat_power()}"
-        text_color = (225, 255, 225) if is_hovered or is_selected else (210, 240, 210)
-
-        screen.blit(self.font.render(line, True, text_color), (810, y + 2))
+        screen.blit(self.font.render(line, True, (210, 240, 210)), (810, y + 2))
 
     def draw_selected_hero_details(self, screen):
         if self.selected_hero is None:
@@ -258,49 +287,68 @@ class ManagementScene:
             screen.blit(self.font.render(line, True, color), (40, y))
             y += 24
 
-        if self.selected_source == "Contract":
-            hint = "Selected contract hero can be hired from this panel."
-            screen.blit(self.font.render(hint, True, (190, 190, 220)), (850, 548))
-        elif self.selected_source == "Roster":
-            hint = "Roster actions will be added here later."
-            screen.blit(self.font.render(hint, True, (190, 220, 190)), (850, 548))
+    def draw_scrollbar(self, screen, panel, scroll, item_count, visible_count):
+        track_rect = self.scrollbar_track_rect(panel)
 
-    def draw_scroll_hint(self, screen, panel, scroll, item_count, visible_count):
+        pygame.draw.rect(screen, (44, 44, 54), track_rect, border_radius=4)
+
         if item_count <= visible_count:
+            pygame.draw.rect(screen, (72, 72, 88), track_rect, border_radius=4)
             return
 
-        max_scroll = item_count - visible_count
-        hint = f"{scroll + 1}-{min(scroll + visible_count, item_count)} of {item_count}"
+        max_scroll = max(1, item_count - visible_count)
 
-        screen.blit(
-            self.font.render(hint, True, (160, 160, 175)),
-            (panel.rect.right - 110, panel.rect.bottom - 28),
+        thumb_height = max(
+            28,
+            int(track_rect.height * (visible_count / item_count)),
         )
 
-        track_rect = pygame.Rect(panel.rect.right - 18, panel.rect.y + 48, 6, panel.rect.height - 80)
-        pygame.draw.rect(screen, (58, 58, 68), track_rect, border_radius=3)
-
-        thumb_height = max(24, int(track_rect.height * (visible_count / item_count)))
-        scroll_ratio = 0 if max_scroll == 0 else scroll / max_scroll
+        scroll_ratio = scroll / max_scroll
         thumb_y = track_rect.y + int((track_rect.height - thumb_height) * scroll_ratio)
 
-        thumb_rect = pygame.Rect(track_rect.x, thumb_y, track_rect.width, thumb_height)
-        pygame.draw.rect(screen, (130, 130, 160), thumb_rect, border_radius=3)
+        thumb_rect = pygame.Rect(
+            track_rect.x,
+            thumb_y,
+            track_rect.width,
+            thumb_height,
+        )
+
+        pygame.draw.rect(screen, (120, 120, 150), thumb_rect, border_radius=4)
+
+        hint = f"{scroll + 1}-{min(scroll + visible_count, item_count)} of {item_count}"
+        screen.blit(
+            self.font.render(hint, True, (160, 160, 175)),
+            (panel.rect.right - 118, panel.rect.bottom - 28),
+        )
+
+    def scrollbar_track_rect(self, panel):
+        return pygame.Rect(
+            panel.rect.right - self.SCROLLBAR_MARGIN - self.SCROLLBAR_WIDTH,
+            panel.rect.y + 50,
+            self.SCROLLBAR_WIDTH,
+            panel.rect.height - 82,
+        )
 
     def build_all_buttons(self):
         buttons = []
+        buttons.extend(self.build_header_buttons())
         buttons.extend(self.build_contract_buttons())
         buttons.extend(self.build_detail_buttons())
         return buttons
 
+    def build_header_buttons(self):
+        return [
+            Button((1120, 40, 80, 32), "Hub", self.on_return_to_hub),
+        ]
+
     def build_contract_buttons(self):
         buttons = []
 
-        y = self.CONTRACT_ROW_START_Y
+        y = self.contract_row_start_y
         for hero in self.visible_contracts():
             buttons.append(
                 Button(
-                    (620, y + 3, 105, 28),
+                    (595, y + 3, 105, 28),
                     "Hire",
                     lambda h=hero: self.hire_hero(h),
                 )
@@ -316,18 +364,14 @@ class ManagementScene:
             return buttons
 
         if self.selected_source == "Contract":
-            buttons.append(
-                Button(
-                    (1010, 610, 190, 42),
-                    "Hire Selected",
-                    self.hire_selected_hero,
-                )
-            )
+            buttons.append(Button((1010, 610, 190, 42), "Hire Selected", self.hire_selected_hero))
+        elif self.selected_source == "Roster":
+            buttons.append(Button((1010, 610, 190, 42), "Release Selected", self.release_selected_hero))
 
         return buttons
 
     def handle_row_click(self, pos):
-        y = self.CONTRACT_ROW_START_Y
+        y = self.contract_row_start_y
         for hero in self.visible_contracts():
             if self.contract_row_rect(y).collidepoint(pos):
                 self.selected_hero = hero
@@ -335,7 +379,7 @@ class ManagementScene:
                 return
             y += self.CONTRACT_ROW_SPACING
 
-        y = self.ROSTER_ROW_START_Y
+        y = self.roster_row_start_y
         for hero in self.visible_roster():
             if self.roster_row_rect(y).collidepoint(pos):
                 self.selected_hero = hero
@@ -352,7 +396,7 @@ class ManagementScene:
         return self.state.roster[self.roster_scroll:end]
 
     def contract_row_rect(self, y):
-        return pygame.Rect(36, y - 10, 708, 54)
+        return pygame.Rect(36, y - 10, 684, 54)
 
     def roster_row_rect(self, y):
-        return pygame.Rect(796, y - 8, 448, 40)
+        return pygame.Rect(796, y - 8, 420, 40)
