@@ -31,6 +31,11 @@ class Hero:
     debt: int = 0
     is_temporary_survivor: bool = False
 
+    # New campaign-cycle direction.
+    # Satisfaction replaces long-term contract pressure over time.
+    satisfaction: int = 80
+    participated_this_cycle: bool = False
+
     def total_stat(self, stat_name: str) -> int:
         total = self.stats.get(stat_name, 0)
         for item in self.equipment.values():
@@ -68,6 +73,32 @@ class Hero:
         if percent < 0.75:
             return "HURT"
         return "Healthy"
+
+    def satisfaction_label(self) -> str:
+        if self.satisfaction >= 80:
+            return "Happy"
+        if self.satisfaction >= 50:
+            return "Content"
+        if self.satisfaction >= 25:
+            return "Unhappy"
+        if self.satisfaction > 0:
+            return "Leaving Soon"
+        return "Leaving"
+
+    def adjust_satisfaction(self, amount: int, reason: str = "") -> str:
+        old_value = self.satisfaction
+        self.satisfaction = max(0, min(100, self.satisfaction + amount))
+
+        if amount == 0:
+            return ""
+
+        sign = "+" if amount > 0 else ""
+        reason_text = f" ({reason})" if reason else ""
+        return (
+            f"{self.name} satisfaction {sign}{amount}: "
+            f"{old_value} -> {self.satisfaction} "
+            f"[{self.satisfaction_label()}]{reason_text}."
+        )
 
     def total_contract_value(self) -> int:
         return self.signing_bonus + (self.wage_per_year * self.contract_years)
@@ -172,6 +203,13 @@ class Hero:
         return f"{self.name} suffered a mortal wound: -{actual_loss} {stat}, {duration_years} year recovery."
 
     def advance_time(self, years_passed: int) -> List[str]:
+        """
+        Legacy yearly advancement.
+
+        The newer campaign-cycle system should be preferred going forward.
+        This method remains for compatibility while the old year/contract systems
+        are gradually retired.
+        """
         messages = []
 
         self.contract_years -= years_passed
@@ -246,6 +284,7 @@ class Hero:
 
         damage_text = self.damage_type()
         wage_text = f"{self.wage_per_year}g/y"
+        satisfaction_text = f"{self.satisfaction}"
 
         class_col = None
         damage_col = None
@@ -253,6 +292,7 @@ class Hero:
         terms_col = None
         status_col = None
         wage_col = None
+        satisfaction_col = None
 
         if use_color:
             class_col = {
@@ -300,6 +340,13 @@ class Hero:
             else:
                 wage_col = Color.GREEN
 
+            if self.satisfaction >= 75:
+                satisfaction_col = Color.GREEN
+            elif self.satisfaction >= 35:
+                satisfaction_col = Color.YELLOW
+            else:
+                satisfaction_col = Color.RED
+
         columns = [
             pad_col(self.name, 18),
             pad_col(self.hero_class, 8, class_col),
@@ -314,6 +361,7 @@ class Hero:
             pad_col(hp_status, 17, status_col),
             pad_col(f"{self.contract_years}y", 4, align="right"),
             pad_col(wage_text, 12, wage_col, align="right"),
+            pad_col(satisfaction_text, 5, satisfaction_col, align="right"),
         ]
 
         if include_money:
@@ -368,6 +416,7 @@ class Hero:
             f"  Specialty: {self.specialty} - {specialty_description(self.specialty)}\n"
             f"  Growth Rate: {self.growth_rate} (x{self.growth_multiplier():.2f}) - {growth_description(self.growth_rate)}\n"
             f"  Contract Attitude: {self.contract_attitude} - {attitude_description(self.contract_attitude)}\n"
+            f"  Satisfaction: {self.satisfaction}/100 ({self.satisfaction_label()})\n"
             f"  Damage Type: {self.damage_type()}\n"
             f"  XP: {self.xp}/{self.xp_to_next_level()}\n"
             f"  Stats: {stat_text}\n"

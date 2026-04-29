@@ -145,13 +145,43 @@ def apply_reputation_to_contract(hero: Hero, reputation) -> None:
     hero.signing_bonus = max(1, int(hero.signing_bonus * signing_multiplier))
 
 
-def generate_hero(existing_names: Set[str], reputation) -> Hero:
+def choose_class_for_state(rules: Dict, state) -> str:
+    unlocked_classes = getattr(state.guild_upgrades, "unlocked_classes", ["Warrior"])
+    valid_classes = [
+        class_name
+        for class_name in unlocked_classes
+        if class_name in rules["classes"]
+    ]
+
+    if not valid_classes:
+        valid_classes = ["Warrior"]
+
+    return random.choice(valid_classes)
+
+
+def choose_level_for_state(class_rules: Dict, state) -> int:
+    level_cap = getattr(state.guild_upgrades, "recruit_level_cap", 1)
+    level_weights = class_rules.get("level_weights", {"1": 1})
+
+    capped_weights = {
+        level: weight
+        for level, weight in level_weights.items()
+        if int(level) <= level_cap
+    }
+
+    if not capped_weights:
+        capped_weights = {"1": 1}
+
+    return int(weighted_choice(capped_weights))
+
+
+def generate_hero(existing_names: Set[str], state) -> Hero:
     rules = load_hero_generation_rules()
-    class_name = random.choice(list(rules["classes"].keys()))
+    class_name = choose_class_for_state(rules, state)
     class_rules = rules["classes"][class_name]
 
     age = random.randint(class_rules["age_min"], class_rules["age_max"])
-    level = int(weighted_choice(class_rules.get("level_weights", {"1": 1})))
+    level = choose_level_for_state(class_rules, state)
 
     stats = {}
     for stat, stat_range in class_rules["stat_ranges"].items():
@@ -166,7 +196,7 @@ def generate_hero(existing_names: Set[str], reputation) -> Hero:
         level=level,
         stats=stats,
         contract_attitude=contract_attitude,
-        reputation=reputation,
+        reputation=state.reputation,
     )
 
     contract_rules = rules.get("contract_years", {"min": 2, "max": 7})
@@ -187,7 +217,7 @@ def generate_hero(existing_names: Set[str], reputation) -> Hero:
         contract_attitude=contract_attitude,
     )
 
-    apply_reputation_to_contract(hero, reputation)
+    apply_reputation_to_contract(hero, state.reputation)
     return hero
 
 
@@ -207,7 +237,7 @@ def generate_contract_market(state, count: int | None = None) -> List[Hero]:
 
     generated = []
     while len(generated) < market_size:
-        hero = generate_hero(existing_names, state.reputation)
+        hero = generate_hero(existing_names, state)
         existing_names.add(hero.name)
         generated.append(hero)
 

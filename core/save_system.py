@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from game_state import BereavementPayment, GameState
 from manager_reputation import ManagerReputation
 from models import Dungeon, Hero, Item
+from systems.guild_upgrades import guild_upgrades_from_dict, guild_upgrades_to_dict
 
 
 SAVE_DIR = Path("saves")
@@ -61,6 +62,8 @@ def hero_to_dict(hero: Hero) -> Dict:
         "current_health": hero.current_health,
         "debt": hero.debt,
         "is_temporary_survivor": hero.is_temporary_survivor,
+        "satisfaction": getattr(hero, "satisfaction", 80),
+        "participated_this_cycle": getattr(hero, "participated_this_cycle", False),
     }
 
 
@@ -84,6 +87,8 @@ def hero_from_dict(data: Dict) -> Hero:
         current_health=data.get("current_health"),
         debt=int(data.get("debt", 0)),
         is_temporary_survivor=bool(data.get("is_temporary_survivor", False)),
+        satisfaction=int(data.get("satisfaction", 80)),
+        participated_this_cycle=bool(data.get("participated_this_cycle", False)),
     )
     return hero
 
@@ -170,7 +175,7 @@ def bereavement_from_dict(data: Dict) -> BereavementPayment:
 
 def game_state_to_dict(state: GameState) -> Dict:
     return {
-        "version": 2,
+        "version": 4,
         "expedition": state.expedition,
         "year": state.year,
         "gold": state.gold,
@@ -184,6 +189,7 @@ def game_state_to_dict(state: GameState) -> Dict:
         "pending_bereavement_payments": [
             bereavement_to_dict(payment) for payment in state.pending_bereavement_payments
         ],
+        "guild_upgrades": guild_upgrades_to_dict(state.guild_upgrades),
     }
 
 
@@ -205,6 +211,7 @@ def game_state_from_dict(data: Dict) -> GameState:
             bereavement_from_dict(payment_data)
             for payment_data in data.get("pending_bereavement_payments", [])
         ],
+        guild_upgrades=guild_upgrades_from_dict(data.get("guild_upgrades")),
     )
 
 

@@ -2,16 +2,32 @@ from combat_types import party_matchup_summary
 import random
 from typing import List
 
-from event_system import apply_event_reputation, choose_event_choice, choose_event_for_enemy, describe_event_choice, print_event_choices
+from event_system import (
+    apply_event_reputation,
+    choose_event_choice,
+    choose_event_for_enemy,
+    describe_event_choice,
+    print_event_choices,
+)
 from game_state import GameState
-from hero_specialties import apply_life_cleric_healing, describe_party_specialties, has_specialty, item_drop_bonus, treasure_gold_multiplier
+from hero_specialties import (
+    apply_life_cleric_healing,
+    describe_party_specialties,
+    has_specialty,
+    item_drop_bonus,
+    treasure_gold_multiplier,
+)
 from manager_reputation import reputation_for_wound
 from models import Dungeon, Hero
-from .combat_system import apply_room_damage_and_casualties, estimate_success_chance, resolve_combat_room
-from .loot_system import generate_item_drop
-from .room_resolution import RoomOption, RoomResolution
-from .shared import exit_game, format_success_chance, is_exit_command, print_party_status
-from .survivor_system import resolve_survivor_room
+from systems.combat_system import (
+    apply_room_damage_and_casualties,
+    estimate_success_chance,
+    resolve_combat_room,
+)
+from systems.loot_system import generate_item_drop
+from systems.room_resolution import RoomOption, RoomResolution
+from systems.shared import exit_game, format_success_chance, is_exit_command, print_party_status
+from systems.survivor_system import resolve_survivor_room
 from ui import bold, danger, highlight, info, success, warning
 
 
@@ -36,6 +52,7 @@ def generate_room_options(dungeon: Dungeon, room_number: int) -> List[RoomOption
 
     return random.sample(possible_rooms, 3)
 
+
 def choose_room_option(dungeon: Dungeon, room_number: int, party: List[Hero]) -> RoomOption:
     options = generate_room_options(dungeon, room_number)
 
@@ -54,7 +71,12 @@ def choose_room_option(dungeon: Dungeon, room_number: int, party: List[Hero]) ->
         extra = ""
         if option.room_type in COMBAT_ROOM_TYPES:
             enemy_power = dungeon.room_enemy_power(room_number, option.room_type)
-            chance = estimate_success_chance(party, enemy_power, option.room_type, dungeon.enemy_type_for_room(option.room_type))
+            chance = estimate_success_chance(
+                party,
+                enemy_power,
+                option.room_type,
+                dungeon.enemy_type_for_room(option.room_type),
+            )
             extra = f" | Enemy Power {enemy_power} | Expected Combat Edge {format_success_chance(chance)}"
 
         print(f"{index}. {option.room_type}: {option.description}{extra}")
@@ -79,6 +101,7 @@ def choose_room_option(dungeon: Dungeon, room_number: int, party: List[Hero]) ->
 
         print(f"Please choose a number from 1 to {len(options)}.")
 
+
 def print_room_result(room_messages: List[str], party: List[Hero]) -> None:
     print("\n" + bold("ROOM RESULT"))
     print("-" * 60)
@@ -93,6 +116,7 @@ def print_room_result(room_messages: List[str], party: List[Hero]) -> None:
         print_party_status(party)
 
     print("-" * 60)
+
 
 def resolve_treasure_room(state: GameState, party: List[Hero], dungeon: Dungeon) -> RoomResolution:
     messages = []
@@ -135,6 +159,7 @@ def resolve_treasure_room(state: GameState, party: List[Hero], dungeon: Dungeon)
     messages.extend(apply_life_cleric_healing(party))
     return RoomResolution(messages=messages, loot=room_loot, xp=room_xp)
 
+
 def resolve_shrine_room(party: List[Hero], dungeon: Dungeon) -> RoomResolution:
     messages = [highlight("The party discovers a forgotten shrine.")]
     heal_amount = 12 + (dungeon.difficulty * 4)
@@ -144,6 +169,7 @@ def resolve_shrine_room(party: List[Hero], dungeon: Dungeon) -> RoomResolution:
 
     messages.extend(apply_life_cleric_healing(party))
     return RoomResolution(messages=messages, loot=0, xp=0)
+
 
 def resolve_camp_room(party: List[Hero], dungeon: Dungeon) -> RoomResolution:
     messages = [success("The party finds a defensible camp and takes time to recover.")]
@@ -155,11 +181,14 @@ def resolve_camp_room(party: List[Hero], dungeon: Dungeon) -> RoomResolution:
     messages.extend(apply_life_cleric_healing(party))
     return RoomResolution(messages=messages, loot=0, xp=0)
 
-def resolve_event_room(state: GameState, party: List[Hero], dungeon: Dungeon) -> RoomResolution:
-    event = choose_event_for_enemy(dungeon.enemy_type)
-    print_event_choices(event)
 
-    choice = choose_event_choice(event, is_exit_command, exit_game)
+def resolve_event_choice(
+    state: GameState,
+    party: List[Hero],
+    dungeon: Dungeon,
+    event: dict,
+    choice: dict,
+) -> RoomResolution:
     outcome = choice.get("outcome", "nothing")
     messages = [
         highlight(f"Event: {event.get('name', 'Unknown Event')}"),
@@ -191,6 +220,7 @@ def resolve_event_room(state: GameState, party: List[Hero], dungeon: Dungeon) ->
         bonus_xp = max(5, dungeon.xp_reward // max(2, dungeon.room_count))
         messages.append(info(f"The party gains {bonus_xp} forbidden XP."))
         trap_power = int(dungeon.enemy_power * random.uniform(0.35, 0.65))
+
         messages.extend(
             apply_room_damage_and_casualties(
                 state=state,
@@ -220,6 +250,7 @@ def resolve_event_room(state: GameState, party: List[Hero], dungeon: Dungeon) ->
         room_loot = random.randint(dungeon.loot_min // 4, dungeon.loot_max // 2)
         messages.append(success(f"The party grabs supplies worth {room_loot}g."))
         trap_power = int(dungeon.enemy_power * random.uniform(0.45, 0.85))
+
         messages.extend(
             apply_room_damage_and_casualties(
                 state=state,
@@ -265,6 +296,15 @@ def resolve_event_room(state: GameState, party: List[Hero], dungeon: Dungeon) ->
     messages.extend(apply_life_cleric_healing(party))
     return RoomResolution(messages=messages, loot=0, xp=0)
 
+
+def resolve_event_room(state: GameState, party: List[Hero], dungeon: Dungeon) -> RoomResolution:
+    event = choose_event_for_enemy(dungeon.enemy_type)
+    print_event_choices(event)
+
+    choice = choose_event_choice(event, is_exit_command, exit_game)
+    return resolve_event_choice(state, party, dungeon, event, choice)
+
+
 def resolve_room(
     state: GameState,
     party: List[Hero],
@@ -291,4 +331,3 @@ def resolve_room(
         return resolve_survivor_room(party, dungeon)
 
     return RoomResolution(messages=[warning("The party turns back.")], loot=0, xp=0)
-

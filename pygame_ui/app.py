@@ -8,6 +8,9 @@ from pygame_ui.scenes.main_menu_scene import MainMenuScene
 from pygame_ui.scenes.management_scene import ManagementScene
 from pygame_ui.scenes.expedition_scene import ExpeditionScene
 from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
+from pygame_ui.scenes.inventory_scene import InventoryScene
+from pygame_ui.scenes.market_scene import MarketScene
+from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
 
 
 class App:
@@ -58,6 +61,9 @@ class App:
             state=self.state,
             on_open_guild=self.show_guild,
             on_open_expedition=self.show_expedition,
+            on_open_inventory=self.show_inventory,
+            on_open_market=self.show_market,
+            on_open_upgrades=self.show_guild_upgrades,
             on_save_game=self.save_current_game,
             on_return_to_menu=self.show_main_menu,
             status_message=status_message,
@@ -82,6 +88,31 @@ class App:
             state=self.state,
             party=party,
             dungeon=dungeon,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
+    def show_inventory(self):
+        self.scene = InventoryScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
+    def show_market(self):
+        if not self.state.guild_upgrades.market_unlocked:
+            self.show_game_hub("Market is locked. Buy the Open Guild Market upgrade first.")
+            return
+
+        self.scene = MarketScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
+    def show_guild_upgrades(self):
+        self.scene = GuildUpgradesScene(
+            state=self.state,
             on_return_to_hub=self.show_game_hub,
             on_save_game=self.save_current_game,
         )

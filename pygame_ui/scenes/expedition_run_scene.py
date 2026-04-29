@@ -1,18 +1,21 @@
-import re
 import pygame
 
+from event_system import choose_event_for_enemy
 from expedition_runner import finish_expedition
 from manager_reputation import reputation_for_level_up
+from pygame_ui.ui_helpers import clean_ansi_text, clamp_scroll, draw_scrollbar, truncate_text, wrap_text
+from systems.campaign_cycle import CampaignCycleManager
 from systems.combat_system import estimate_success_chance
-from systems.room_system import COMBAT_ROOM_TYPES, generate_room_options, resolve_room
+from systems.room_system import (
+    COMBAT_ROOM_TYPES,
+    generate_room_options,
+    resolve_event_choice,
+    resolve_room,
+)
 from systems.survivor_system import remove_temporary_survivors_from_party
-from systems.wage_system import advance_one_year_after_room
 
 from ..widgets.button import Button
 from ..widgets.panel import Panel
-
-
-ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class ExpeditionRunScene:
@@ -25,6 +28,7 @@ class ExpeditionRunScene:
     def __init__(self, state, party, dungeon, on_return_to_hub, on_save_game):
         self.state = state
         self.party = party
+        self.dispatched_heroes = list(party)
         self.dungeon = dungeon
         self.on_return_to_hub = on_return_to_hub
         self.on_save_game = on_save_game
@@ -47,7 +51,11 @@ class ExpeditionRunScene:
         self.log_scroll = 0
 
         self.awaiting_continue = False
+        self.awaiting_event_choice = False
         self.expedition_finished = False
+
+        self.active_event = None
+        self.active_event_room_option = None
 
         self.header_panel = Panel((20, 16, 1240, 86), "Expedition Run")
         self.choice_panel = Panel((20, 120, 520, 290), "Choose Path")
@@ -56,6 +64,7 @@ class ExpeditionRunScene:
 
         for hero in self.party:
             hero.reset_health_for_expedition()
+            hero.participated_this_cycle = True
 
         self.log_lines.append(f"Expedition started: {self.dungeon.name}")
         self.generate_next_room_options()
@@ -70,7 +79,7 @@ class ExpeditionRunScene:
         elif event.type == pygame.MOUSEWHEEL:
             if self.log_panel.rect.collidepoint(self.mouse_pos):
                 self.log_scroll -= event.y
-                self.log_scroll = self.clamp_scroll(
+                self.log_scroll = clamp_scroll(
                     self.log_scroll,
                     len(self.wrapped_log_lines()),
                     self.LOG_VISIBLE_ROWS,
@@ -113,6 +122,10 @@ class ExpeditionRunScene:
             self.draw_choice_message(screen, "Expedition complete.")
             return
 
+        if self.awaiting_event_choice:
+            self.draw_event_choices(screen)
+            return
+
         if self.awaiting_continue:
             self.draw_choice_message(screen, "Room resolved. Continue when ready, or retreat from the dungeon.")
             return
@@ -136,7 +149,7 @@ class ExpeditionRunScene:
                 chance = estimate_success_chance(self.party, enemy_power, option.room_type, enemy_type)
                 text += f" | Enemy {enemy_power} | Edge {chance * 100:.1f}%"
 
-            wrapped = self.wrap_text(text, self.small_font, 320)
+            wrapped = wrap_text(text, self.small_font, 320)
 
             line_y = row_rect.y + 9
             for line in wrapped[:2]:
@@ -145,9 +158,37 @@ class ExpeditionRunScene:
 
             y += self.CHOICE_ROW_SPACING
 
+    def draw_event_choices(self, screen):
+        if not self.active_event:
+            self.draw_choice_message(screen, "No event loaded.")
+            return
+
+        name = self.active_event.get("name", "Unknown Event")
+        description = self.active_event.get("description", "")
+
+        screen.blit(self.font.render(f"Event: {name}", True, (235, 220, 180)), (44, 172))
+
+        wrapped_description = wrap_text(description, self.small_font, 430)
+        y = 200
+        for line in wrapped_description[:2]:
+            screen.blit(self.small_font.render(line, True, (220, 220, 230)), (44, y))
+            y += 20
+
+        y = 250
+        for index, choice in enumerate(self.active_event.get("choices", []), start=1):
+            label = choice.get("label", "Unknown choice")
+            wrapped = wrap_text(f"{index}. {label}", self.small_font, 310)
+
+            for line in wrapped[:2]:
+                screen.blit(self.small_font.render(line, True, (210, 210, 220)), (58, y))
+                y += 20
+
+            y += 18
+
     def draw_choice_message(self, screen, message):
-        wrapped = self.wrap_text(message, self.font, 430)
+        wrapped = wrap_text(message, self.font, 430)
         y = 178
+
         for line in wrapped:
             screen.blit(self.font.render(line, True, (210, 210, 220)), (44, y))
             y += 24
@@ -165,7 +206,8 @@ class ExpeditionRunScene:
 
             line = (
                 f"{hero.name} | {hero.hero_class} | Lv {hero.level} | "
-                f"Pwr {hero.combat_power()} | {hp_text} | {hero.health_status()}"
+                f"Pwr {hero.combat_power()} | {hp_text} | {hero.health_status()} | "
+                f"Sat {hero.satisfaction}"
             )
 
             color = (210, 240, 210)
@@ -174,7 +216,7 @@ class ExpeditionRunScene:
             elif hero.health_status() in ("WOUNDED", "HURT"):
                 color = (235, 210, 130)
 
-            rendered = self.truncate_text(line, self.font, 620)
+            rendered = truncate_text(line, self.font, 620)
             screen.blit(self.font.render(rendered, True, color), (584, y))
             y += 32
 
@@ -187,12 +229,13 @@ class ExpeditionRunScene:
             screen.blit(self.font.render(line, True, (210, 210, 220)), (44, y))
             y += self.LOG_ROW_SPACING
 
-        self.draw_scrollbar(
-            screen,
-            self.log_panel,
-            self.log_scroll,
-            len(display_lines),
-            self.LOG_VISIBLE_ROWS,
+        draw_scrollbar(
+            screen=screen,
+            font=self.font,
+            panel=self.log_panel,
+            scroll=self.log_scroll,
+            item_count=len(display_lines),
+            visible_count=self.LOG_VISIBLE_ROWS,
         )
 
     def build_buttons(self):
@@ -200,6 +243,20 @@ class ExpeditionRunScene:
 
         if self.expedition_finished:
             buttons.append(Button((350, 340, 150, 36), "Return to Hub", self.return_to_hub))
+            return buttons
+
+        if self.awaiting_event_choice:
+            y = 248
+            for choice in self.active_event.get("choices", []):
+                buttons.append(
+                    Button(
+                        (390, y - 8, 110, 30),
+                        "Choose",
+                        lambda c=choice: self.resolve_event_choice_button(c),
+                    )
+                )
+                y += 58
+
             return buttons
 
         if self.awaiting_continue:
@@ -219,25 +276,17 @@ class ExpeditionRunScene:
             )
             y += self.CHOICE_ROW_SPACING
 
-        if self.rooms_completed > 0:
-            buttons.append(Button((230, 340, 120, 36), "Retreat", self.retreat))
-
         return buttons
 
     def generate_next_room_options(self):
-        options = generate_room_options(self.dungeon, self.room_number)
-
-        # Event rooms still use terminal input in the old system, so skip them in the Pygame flow for now.
-        options = [option for option in options if option.room_type != "Event"]
-
-        if not options:
-            options = generate_room_options(self.dungeon, self.room_number)
-
-        self.room_options = options
+        self.room_options = generate_room_options(self.dungeon, self.room_number)
 
     def resolve_room_choice(self, room_option):
         if room_option.room_type == "Event":
-            self.status_message = "Event room UI is not implemented yet."
+            self.active_event = choose_event_for_enemy(self.dungeon.enemy_type)
+            self.active_event_room_option = room_option
+            self.awaiting_event_choice = True
+            self.status_message = "Choose an event response."
             return
 
         room_messages = [
@@ -253,6 +302,33 @@ class ExpeditionRunScene:
             room_option=room_option,
         )
 
+        self.apply_room_resolution(room_messages, resolution)
+
+    def resolve_event_choice_button(self, choice):
+        if not self.active_event or not self.active_event_room_option:
+            self.status_message = "Event failed to resolve."
+            return
+
+        room_messages = [
+            f"=== Room {self.room_number}: Event ===",
+            self.active_event_room_option.description,
+        ]
+
+        resolution = resolve_event_choice(
+            state=self.state,
+            party=self.party,
+            dungeon=self.dungeon,
+            event=self.active_event,
+            choice=choice,
+        )
+
+        self.awaiting_event_choice = False
+        self.active_event = None
+        self.active_event_room_option = None
+
+        self.apply_room_resolution(room_messages, resolution)
+
+    def apply_room_resolution(self, room_messages, resolution):
         room_messages.extend(resolution.messages)
         self.rooms_completed += 1
 
@@ -262,9 +338,9 @@ class ExpeditionRunScene:
             self.loot_earned += resolution.loot
             self.xp_earned += resolution.xp
             self.state.gold += resolution.loot
-            room_messages.append(f"Gold after recovered room loot: {self.state.gold}g.")
 
-        room_messages.extend(advance_one_year_after_room(self.state, self.party, self.room_number))
+            if resolution.loot > 0:
+                room_messages.append(f"Gold after recovered room loot: {self.state.gold}g.")
 
         self.log_lines.extend(room_messages)
         self.scroll_log_to_bottom()
@@ -294,6 +370,7 @@ class ExpeditionRunScene:
     def finish_expedition_run(self, completed):
         self.expedition_finished = True
         self.awaiting_continue = False
+        self.awaiting_event_choice = False
 
         self.log_lines.append(f"Total recovered expedition loot: {self.loot_earned}g.")
         self.log_lines.append(f"Total recovered combat XP: {self.xp_earned}.")
@@ -302,12 +379,16 @@ class ExpeditionRunScene:
             self.log_lines.append("The dungeon route was completed!")
 
         self.apply_xp_and_cleanup()
+
+        cycle_manager = CampaignCycleManager(self.state)
+        self.log_lines.extend(cycle_manager.advance_cycle(self.dispatched_heroes))
+
         self.log_lines.extend(finish_expedition(self.state, self.dungeon))
 
         if self.on_save_game is not None:
             self.on_save_game()
 
-        self.status_message = "Expedition complete. Results saved."
+        self.status_message = "Expedition complete. Campaign cycle resolved and saved."
         self.scroll_log_to_bottom()
 
     def apply_xp_and_cleanup(self):
@@ -325,8 +406,6 @@ class ExpeditionRunScene:
                 for _ in range(hero.level - old_level):
                     self.log_lines.extend(reputation_for_level_up(self.state.reputation, hero.hero_class))
 
-            hero.current_health = None
-
         self.log_lines.extend(remove_temporary_survivors_from_party(self.state, self.party))
 
     def return_to_hub(self):
@@ -336,8 +415,8 @@ class ExpeditionRunScene:
         display_lines = []
 
         for line in self.log_lines:
-            clean = self.clean_log_line(line)
-            wrapped = self.wrap_text(clean, self.font, 1120)
+            clean = clean_ansi_text(line)
+            wrapped = wrap_text(clean, self.font, 1120)
 
             if wrapped:
                 display_lines.extend(wrapped)
@@ -348,70 +427,11 @@ class ExpeditionRunScene:
 
     def scroll_log_to_bottom(self):
         display_lines = self.wrapped_log_lines()
-        self.log_scroll = self.clamp_scroll(
+        self.log_scroll = clamp_scroll(
             max(0, len(display_lines) - self.LOG_VISIBLE_ROWS),
             len(display_lines),
             self.LOG_VISIBLE_ROWS,
         )
-
-    def clean_log_line(self, line):
-        return ANSI_ESCAPE_RE.sub("", str(line))
-
-    def wrap_text(self, text, font, max_width):
-        words = str(text).split(" ")
-        lines = []
-        current = ""
-
-        for word in words:
-            test = word if not current else f"{current} {word}"
-
-            if font.size(test)[0] <= max_width:
-                current = test
-            else:
-                if current:
-                    lines.append(current)
-                current = word
-
-        if current:
-            lines.append(current)
-
-        return lines
-
-    def truncate_text(self, text, font, max_width):
-        if font.size(text)[0] <= max_width:
-            return text
-
-        ellipsis = "..."
-        trimmed = text
-
-        while trimmed and font.size(trimmed + ellipsis)[0] > max_width:
-            trimmed = trimmed[:-1]
-
-        return trimmed + ellipsis
-
-    def clamp_scroll(self, value, item_count, visible_count):
-        max_scroll = max(0, item_count - visible_count)
-        return max(0, min(value, max_scroll))
-
-    def draw_scrollbar(self, screen, panel, scroll, item_count, visible_count):
-        track_rect = pygame.Rect(panel.rect.right - 24, panel.rect.y + 50, 8, panel.rect.height - 82)
-
-        pygame.draw.rect(screen, (44, 44, 54), track_rect, border_radius=4)
-
-        if item_count <= visible_count:
-            pygame.draw.rect(screen, (72, 72, 88), track_rect, border_radius=4)
-            return
-
-        max_scroll = max(1, item_count - visible_count)
-        thumb_height = max(28, int(track_rect.height * (visible_count / item_count)))
-        scroll_ratio = scroll / max_scroll
-        thumb_y = track_rect.y + int((track_rect.height - thumb_height) * scroll_ratio)
-
-        thumb_rect = pygame.Rect(track_rect.x, thumb_y, track_rect.width, thumb_height)
-        pygame.draw.rect(screen, (120, 120, 150), thumb_rect, border_radius=4)
-
-        hint = f"{scroll + 1}-{min(scroll + visible_count, item_count)} of {item_count}"
-        screen.blit(self.font.render(hint, True, (160, 160, 175)), (panel.rect.right - 118, panel.rect.bottom - 24))
 
     def choice_row_rect(self, y):
         return pygame.Rect(44, y - 10, 470, self.CHOICE_ROW_HEIGHT)
