@@ -29,7 +29,7 @@ class ExpeditionScene:
         self.header_font = pygame.font.SysFont(None, 30)
 
         self.mouse_pos = (0, 0)
-        self.status_message = "Choose heroes and a dungeon."
+        self.status_message = "Choose a mission, then assign heroes."
 
         self.selected_party = []
         self.selected_dungeon = None
@@ -52,14 +52,7 @@ class ExpeditionScene:
         if self.selected_dungeon is None:
             return 0
 
-        difficulty = self.selected_dungeon.difficulty
-        if difficulty <= 1:
-            return 1
-        if difficulty == 2:
-            return 2
-        if difficulty == 3:
-            return 3
-        return 4
+        return self.party_limit_for_dungeon(self.selected_dungeon)
 
     def available_dungeons(self):
         return available_dungeons_for_state(self.state)
@@ -179,9 +172,10 @@ class ExpeditionScene:
         pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
         pygame.draw.rect(screen, border_color, row_rect, 1, border_radius=8)
 
+        subclass = hero.subclass or "Base"
         line = (
-            f"{hero.name} | {hero.hero_class} | Lv {hero.level} | "
-            f"Pwr {hero.combat_power()} | Cost {hero.wage_per_year}g"
+            f"{hero.name} | {hero.hero_class}/{subclass} | "
+            f"Lv {hero.level} | {hero.career_stage()} | Pwr {hero.combat_power()}"
         )
         rendered_line = truncate_text(line, self.font, 365)
 
@@ -227,7 +221,7 @@ class ExpeditionScene:
         pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
         pygame.draw.rect(screen, border_color, row_rect, 1, border_radius=8)
 
-        line = f"{hero.name} | {hero.hero_class}"
+        line = f"{hero.name} | {hero.career_stage()}"
         rendered_line = truncate_text(line, self.font, 176)
 
         screen.blit(self.font.render(rendered_line, True, (210, 240, 210)), (602, row_rect.y + 11))
@@ -298,9 +292,13 @@ class ExpeditionScene:
 
         lines = [
             f"Party Power: {party_power}",
-            f"Expedition Cost: {expedition_cost}g",
+            f"Dispatch Cost: {expedition_cost}g",
             f"Selected Heroes: {', '.join(hero.name for hero in self.selected_party) or 'None'}",
         ]
+
+        if self.selected_party:
+            mentorship_total = sum(hero.mentorship_value() for hero in self.selected_party)
+            lines.append(f"Party Mentorship Value: {mentorship_total}")
 
         if self.selected_dungeon:
             dungeon = self.selected_dungeon

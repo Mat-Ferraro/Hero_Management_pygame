@@ -6,6 +6,7 @@ from manager_reputation import reputation_for_level_up
 from pygame_ui.ui_helpers import clean_ansi_text, clamp_scroll, draw_scrollbar, truncate_text, wrap_text
 from systems.campaign_cycle import CampaignCycleManager
 from systems.combat_system import estimate_success_chance
+from systems.mentorship_system import apply_party_mentorship
 from systems.room_system import (
     COMBAT_ROOM_TYPES,
     generate_room_options,
@@ -108,8 +109,8 @@ class ExpeditionRunScene:
     def draw_header(self, screen):
         stats = (
             f"Gold: {self.state.gold}g    "
-            f"Year: {self.state.year}    "
-            f"Expedition: {self.state.expedition}    "
+            f"Campaign Year: {self.state.year}    "
+            f"Campaign: {self.state.expedition}    "
             f"Room: {min(self.room_number, self.dungeon.room_count)}/{self.dungeon.room_count}    "
             f"Loot: {self.loot_earned}g    XP: {self.xp_earned}"
         )
@@ -205,9 +206,8 @@ class ExpeditionRunScene:
                 hp_text = f"{hero.current_health}/{hero.max_health()} HP"
 
             line = (
-                f"{hero.name} | {hero.hero_class} | Lv {hero.level} | "
-                f"Pwr {hero.combat_power()} | {hp_text} | {hero.health_status()} | "
-                f"Sat {hero.satisfaction}"
+                f"{hero.name} | {hero.hero_class} | {hero.career_stage()} | Lv {hero.level} | "
+                f"Pwr {hero.combat_power()} | {hp_text} | Mentor {hero.mentorship_value()}"
             )
 
             color = (210, 240, 210)
@@ -379,6 +379,7 @@ class ExpeditionRunScene:
             self.log_lines.append("The dungeon route was completed!")
 
         self.apply_xp_and_cleanup()
+        self.apply_mentorship()
 
         cycle_manager = CampaignCycleManager(self.state)
         self.log_lines.extend(cycle_manager.advance_cycle(self.dispatched_heroes))
@@ -407,6 +408,13 @@ class ExpeditionRunScene:
                     self.log_lines.extend(reputation_for_level_up(self.state.reputation, hero.hero_class))
 
         self.log_lines.extend(remove_temporary_survivors_from_party(self.state, self.party))
+
+    def apply_mentorship(self):
+        mentorship_messages = apply_party_mentorship(self.party, self.xp_earned)
+
+        if mentorship_messages:
+            self.log_lines.append("=== Mentorship ===")
+            self.log_lines.extend(mentorship_messages)
 
     def return_to_hub(self):
         self.on_return_to_hub("Returned from expedition.")

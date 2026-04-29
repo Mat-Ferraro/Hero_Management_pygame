@@ -64,6 +64,8 @@ def hero_to_dict(hero: Hero) -> Dict:
         "is_temporary_survivor": hero.is_temporary_survivor,
         "satisfaction": getattr(hero, "satisfaction", 80),
         "participated_this_cycle": getattr(hero, "participated_this_cycle", False),
+        "subclass": getattr(hero, "subclass", None),
+        "special_ability": getattr(hero, "special_ability", None),
     }
 
 
@@ -89,6 +91,8 @@ def hero_from_dict(data: Dict) -> Hero:
         is_temporary_survivor=bool(data.get("is_temporary_survivor", False)),
         satisfaction=int(data.get("satisfaction", 80)),
         participated_this_cycle=bool(data.get("participated_this_cycle", False)),
+        subclass=data.get("subclass"),
+        special_ability=data.get("special_ability"),
     )
     return hero
 
@@ -175,7 +179,7 @@ def bereavement_from_dict(data: Dict) -> BereavementPayment:
 
 def game_state_to_dict(state: GameState) -> Dict:
     return {
-        "version": 4,
+        "version": 5,
         "expedition": state.expedition,
         "year": state.year,
         "gold": state.gold,

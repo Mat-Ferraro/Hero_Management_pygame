@@ -14,6 +14,7 @@ class GuildUpgrades:
     market_rarity_cap: str = "Common"
     mission_difficulty_cap: int = 1
     crown_stipend: int = 50
+    training_hall_level: int = 0
 
 
 UPGRADE_DEFINITIONS: Dict[str, Dict] = {
@@ -37,6 +38,27 @@ UPGRADE_DEFINITIONS: Dict[str, Dict] = {
         "description": "Increase guild roster capacity to 6 heroes.",
         "requires": lambda upgrades: upgrades.roster_capacity == 4,
         "apply": lambda upgrades: setattr(upgrades, "roster_capacity", 6),
+    },
+    "unlock_training_hall": {
+        "name": "Build Training Hall",
+        "cost": 175,
+        "description": "Unlock paid hero training during the guild phase.",
+        "requires": lambda upgrades: upgrades.training_hall_level < 1,
+        "apply": lambda upgrades: setattr(upgrades, "training_hall_level", 1),
+    },
+    "training_hall_2": {
+        "name": "Improve Training Hall I",
+        "cost": 350,
+        "description": "Improve training XP gains.",
+        "requires": lambda upgrades: upgrades.training_hall_level == 1,
+        "apply": lambda upgrades: setattr(upgrades, "training_hall_level", 2),
+    },
+    "training_hall_3": {
+        "name": "Improve Training Hall II",
+        "cost": 700,
+        "description": "Further improve training XP gains. Future: unlock specialization.",
+        "requires": lambda upgrades: upgrades.training_hall_level == 2,
+        "apply": lambda upgrades: setattr(upgrades, "training_hall_level", 3),
     },
     "unlock_rogue": {
         "name": "Build Rogue Den",
@@ -141,6 +163,7 @@ def guild_upgrades_to_dict(upgrades: GuildUpgrades) -> Dict:
         "market_rarity_cap": upgrades.market_rarity_cap,
         "mission_difficulty_cap": upgrades.mission_difficulty_cap,
         "crown_stipend": upgrades.crown_stipend,
+        "training_hall_level": upgrades.training_hall_level,
     }
 
 
@@ -148,7 +171,6 @@ def guild_upgrades_from_dict(data: Dict | None) -> GuildUpgrades:
     if not data:
         return GuildUpgrades()
 
-    # Backward compatibility with the temporary party_slots field.
     roster_capacity = data.get("roster_capacity", data.get("party_slots", 1))
 
     return GuildUpgrades(
@@ -159,4 +181,5 @@ def guild_upgrades_from_dict(data: Dict | None) -> GuildUpgrades:
         market_rarity_cap=data.get("market_rarity_cap", "Common"),
         mission_difficulty_cap=int(data.get("mission_difficulty_cap", 1)),
         crown_stipend=int(data.get("crown_stipend", 50)),
+        training_hall_level=int(data.get("training_hall_level", 0)),
     )

@@ -5,9 +5,17 @@ from combat_types import damage_type_for_hero
 from growth_rates import growth_description, growth_multiplier
 from contract_attitudes import attitude_description
 from hero_specialties import specialty_description
+from systems.age_curve import (
+    age_power_multiplier,
+    career_stage,
+    career_summary,
+    mentorship_value,
+    retirement_age,
+    retirement_pressure,
+)
 from .class_rules import CLASS_RULES, STAT_NAMES
 from .item import Item
-from ui import Color, color_health_status, pad_col, warning
+from ui import Color, pad_col
 
 
 @dataclass
@@ -31,10 +39,11 @@ class Hero:
     debt: int = 0
     is_temporary_survivor: bool = False
 
-    # New campaign-cycle direction.
-    # Satisfaction replaces long-term contract pressure over time.
     satisfaction: int = 80
     participated_this_cycle: bool = False
+
+    subclass: Optional[str] = None
+    special_ability: Optional[str] = None
 
     def total_stat(self, stat_name: str) -> int:
         total = self.stats.get(stat_name, 0)
@@ -74,6 +83,18 @@ class Hero:
             return "HURT"
         return "Healthy"
 
+    def career_stage(self) -> str:
+        return career_stage(self)
+
+    def age_power_multiplier(self) -> float:
+        return age_power_multiplier(self)
+
+    def mentorship_value(self) -> int:
+        return mentorship_value(self)
+
+    def retirement_age(self) -> int:
+        return retirement_age(self)
+
     def satisfaction_label(self) -> str:
         if self.satisfaction >= 80:
             return "Happy"
@@ -105,11 +126,25 @@ class Hero:
 
     def combat_power(self) -> int:
         class_rules = CLASS_RULES[self.hero_class]
+
         primary = sum(self.total_stat(stat) * 3 for stat in class_rules["primary_stats"])
         secondary = sum(self.total_stat(stat) * 2 for stat in class_rules["secondary_stats"])
         general = sum(self.total_stat(stat) for stat in STAT_NAMES)
+
+        raw_power = primary + secondary + general + self.level * 5
+
         injury_penalty = 0.65 if self.injured_years_remaining > 0 else 1.0
-        return max(1, int((primary + secondary + general + self.level * 5) * injury_penalty))
+        age_multiplier = self.age_power_multiplier()
+
+        subclass_bonus = 1.0
+        if self.subclass:
+            subclass_bonus += 0.04
+
+        ability_bonus = 1.0
+        if self.special_ability:
+            ability_bonus += 0.03
+
+        return max(1, int(raw_power * injury_penalty * age_multiplier * subclass_bonus * ability_bonus))
 
     def damage_type(self) -> str:
         return damage_type_for_hero(self)
@@ -134,31 +169,34 @@ class Hero:
         return messages
 
     def adjust_xp_for_age(self, base_xp: int) -> int:
-        rules = CLASS_RULES[self.hero_class]
-        if self.age <= rules["young_until"]:
-            multiplier = 1.25
-        elif self.age <= rules["prime_until"]:
-            multiplier = 1.0
+        stage = self.career_stage()
+
+        if stage == "Developing":
+            multiplier = 1.20
+        elif stage == "Prime":
+            multiplier = 1.00
+        elif stage == "Veteran":
+            multiplier = 0.85
         else:
             if self.hero_class == "Mage":
-                multiplier = 1.1
-            elif self.hero_class == "Cleric":
-                multiplier = 0.95
+                multiplier = 1.05
             else:
-                multiplier = 0.75
+                multiplier = 0.65
+
         return max(1, int(base_xp * multiplier * self.growth_multiplier()))
 
     def level_up(self) -> List[str]:
         import random
 
-        rules = CLASS_RULES[self.hero_class]
         messages = [f"{self.name} reached level {self.level}!"]
 
-        for stat in rules["primary_stats"]:
+        class_rules = CLASS_RULES[self.hero_class]
+
+        for stat in class_rules["primary_stats"]:
             self.stats[stat] += 2
             messages.append(f"  +2 {stat}")
 
-        for stat in rules["secondary_stats"]:
+        for stat in class_rules["secondary_stats"]:
             self.stats[stat] += 1
             messages.append(f"  +1 {stat}")
 
@@ -203,13 +241,6 @@ class Hero:
         return f"{self.name} suffered a mortal wound: -{actual_loss} {stat}, {duration_years} year recovery."
 
     def advance_time(self, years_passed: int) -> List[str]:
-        """
-        Legacy yearly advancement.
-
-        The newer campaign-cycle system should be preferred going forward.
-        This method remains for compatibility while the old year/contract systems
-        are gradually retired.
-        """
         messages = []
 
         self.contract_years -= years_passed
@@ -223,41 +254,19 @@ class Hero:
             else:
                 messages.append(f"{self.name} is still injured for {self.injured_years_remaining} more year(s).")
 
-        messages.extend(self.apply_aging(years_passed))
+        old_age = self.age
+        self.age += years_passed
+        messages.append(f"{self.name} aged from {old_age} to {self.age}.")
+
         return messages
 
     def apply_aging(self, years_passed: int) -> List[str]:
-        import random
-
-        messages = []
         old_age = self.age
         self.age += years_passed
-        rules = CLASS_RULES[self.hero_class]
-        decline_stat = rules["old_decline_stat"]
-
-        messages.append(f"{self.name} aged from {old_age} to {self.age}.")
-
-        if decline_stat and self.age > rules["prime_until"]:
-            for _ in range(years_passed):
-                if random.random() < 0.45 and self.stats[decline_stat] > 1:
-                    self.stats[decline_stat] -= 1
-                    messages.append(f"Age is catching up with {self.name}: -1 {decline_stat}.")
-
-        if self.hero_class == "Mage" and self.age > 50:
-            for _ in range(years_passed):
-                if random.random() < 0.35:
-                    self.stats["mind"] += 1
-                    messages.append(f"{self.name}'s studies deepen with age: +1 mind.")
-
-        return messages
+        return [f"{self.name} aged from {old_age} to {self.age}."]
 
     def retirement_chance(self) -> float:
-        rules = CLASS_RULES[self.hero_class]
-        if self.age <= rules["retirement_age"]:
-            return 0.0
-
-        years_over = self.age - rules["retirement_age"]
-        return min(0.75, years_over * 0.06)
+        return retirement_pressure(self)
 
     def should_retire(self) -> bool:
         import random
@@ -283,15 +292,16 @@ class Hero:
             hp_status = self.health_status()
 
         damage_text = self.damage_type()
-        wage_text = f"{self.wage_per_year}g/y"
+        expedition_cost_text = f"{self.wage_per_year}g"
         satisfaction_text = f"{self.satisfaction}"
+        subclass_text = self.subclass or "None"
 
         class_col = None
         damage_col = None
         growth_col = None
         terms_col = None
         status_col = None
-        wage_col = None
+        cost_col = None
         satisfaction_col = None
 
         if use_color:
@@ -334,11 +344,11 @@ class Hero:
             }.get(hp_status, Color.WHITE)
 
             if self.wage_per_year >= 50:
-                wage_col = Color.RED
+                cost_col = Color.RED
             elif self.wage_per_year >= 30:
-                wage_col = Color.YELLOW
+                cost_col = Color.YELLOW
             else:
-                wage_col = Color.GREEN
+                cost_col = Color.GREEN
 
             if self.satisfaction >= 75:
                 satisfaction_col = Color.GREEN
@@ -350,17 +360,18 @@ class Hero:
         columns = [
             pad_col(self.name, 18),
             pad_col(self.hero_class, 8, class_col),
+            pad_col(subclass_text, 12),
             pad_col(self.specialty, 16),
             pad_col(damage_text, 8, damage_col),
             pad_col(self.growth_rate, 9, growth_col),
             pad_col(self.contract_attitude, 10, terms_col),
             pad_col(self.age, 3, align="right"),
+            pad_col(self.career_stage(), 10),
             pad_col(f"Lv {self.level}", 5),
             pad_col(self.combat_power(), 5, align="right"),
             pad_col(hp_text, 9, align="right"),
             pad_col(hp_status, 17, status_col),
-            pad_col(f"{self.contract_years}y", 4, align="right"),
-            pad_col(wage_text, 12, wage_col, align="right"),
+            pad_col(expedition_cost_text, 8, cost_col, align="right"),
             pad_col(satisfaction_text, 5, satisfaction_col, align="right"),
         ]
 
@@ -413,6 +424,11 @@ class Hero:
 
         return (
             f"{self.display_short()}\n"
+            f"  Class: {self.hero_class}\n"
+            f"  Subclass: {self.subclass or 'None'}\n"
+            f"  Special Ability: {self.special_ability or 'None'}\n"
+            f"  Career: {career_summary(self)}\n"
+            f"  Mentorship Value: {self.mentorship_value()}\n"
             f"  Specialty: {self.specialty} - {specialty_description(self.specialty)}\n"
             f"  Growth Rate: {self.growth_rate} (x{self.growth_multiplier():.2f}) - {growth_description(self.growth_rate)}\n"
             f"  Contract Attitude: {self.contract_attitude} - {attitude_description(self.contract_attitude)}\n"

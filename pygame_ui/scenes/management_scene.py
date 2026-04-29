@@ -161,13 +161,15 @@ class ManagementScene:
         pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
         pygame.draw.rect(screen, border_color, row_rect, border_width, border_radius=8)
 
+        subclass = hero.subclass or "No Subclass"
+
         line_1 = (
-            f"{hero.name} | {hero.hero_class} | Lv {hero.level} | "
-            f"Age {hero.age} | Pwr {hero.combat_power()}"
+            f"{hero.name} | {hero.hero_class} | {subclass} | "
+            f"Lv {hero.level} | Age {hero.age} ({hero.career_stage()})"
         )
         line_2 = (
-            f"Recruit {hero.signing_bonus}g | Expedition Cost {hero.wage_per_year}g | "
-            f"Satisfaction {hero.satisfaction}/100"
+            f"Pwr {hero.combat_power()} | Age x{hero.age_power_multiplier():.2f} | "
+            f"Recruit {hero.signing_bonus}g | Dispatch {hero.wage_per_year}g"
         )
 
         screen.blit(
@@ -230,8 +232,12 @@ class ManagementScene:
         pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
         pygame.draw.rect(screen, border_color, row_rect, border_width, border_radius=8)
 
-        line_1 = f"{hero.name} | {hero.hero_class} | Lv {hero.level} | Pwr {hero.combat_power()}"
-        line_2 = f"Age {hero.age} | Sat {hero.satisfaction}/100 ({hero.satisfaction_label()})"
+        subclass = hero.subclass or "No Subclass"
+        line_1 = f"{hero.name} | {hero.hero_class} | {subclass} | Lv {hero.level}"
+        line_2 = (
+            f"Age {hero.age} ({hero.career_stage()}) | "
+            f"Pwr {hero.combat_power()} | Sat {hero.satisfaction}/100"
+        )
 
         screen.blit(
             self.font.render(truncate_text(line_1, self.font, 380), True, (210, 240, 210)),
@@ -254,27 +260,30 @@ class ManagementScene:
 
         left_lines = [
             f"Name: {hero.name}",
-            f"Class: {hero.hero_class}    Level: {hero.level}    Age: {hero.age}",
-            f"Power: {hero.combat_power()}    Health: {hero.max_health()}    Damage: {hero.damage_type()}",
-            f"Recruit Cost: {hero.signing_bonus}g    Expedition Cost: {hero.wage_per_year}g",
+            f"Class: {hero.hero_class}    Subclass: {hero.subclass or 'None'}",
+            f"Special Ability: {hero.special_ability or 'None'}",
+            f"Age: {hero.age}    Stage: {hero.career_stage()}    Retires Around: {hero.retirement_age()}",
             f"Satisfaction: {hero.satisfaction}/100 ({hero.satisfaction_label()})",
+            f"Recruit Cost: {hero.signing_bonus}g    Dispatch Cost: {hero.wage_per_year}g",
         ]
 
         right_lines = [
+            f"Power: {hero.combat_power()}    Age Power: x{hero.age_power_multiplier():.2f}",
+            f"Mentorship Value: {hero.mentorship_value()}",
+            f"Retirement Risk: {hero.retirement_chance() * 100:.1f}%",
             f"Stats: Might {hero.total_stat('might')} | Agility {hero.total_stat('agility')} | Mind {hero.total_stat('mind')} | Spirit {hero.total_stat('spirit')}",
             f"Specialty: {hero.specialty}",
-            f"Growth: {hero.growth_rate}",
             f"XP: {hero.xp}/{hero.xp_to_next_level()}",
             f"Injury: {hero.injured_years_remaining} year(s)" if hero.injured_years_remaining else "Injury: None",
         ]
 
-        y = 548
-        for line in left_lines:
+        y = 538
+        for line in left_lines[:7]:
             screen.blit(self.small_font.render(line, True, (210, 210, 220)), (44, y))
             y += 20
 
-        y = 548
-        for line in right_lines:
+        y = 538
+        for line in right_lines[:7]:
             for wrapped in wrap_text(line, self.small_font, 540)[:2]:
                 screen.blit(self.small_font.render(wrapped, True, (210, 210, 220)), (640, y))
                 y += 20

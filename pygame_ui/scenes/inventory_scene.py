@@ -111,7 +111,7 @@ class InventoryScene:
     def draw_header(self, screen):
         stats = (
             f"Gold: {self.state.gold}g    "
-            f"Roster: {len(self.state.roster)}    "
+            f"Roster: {len(self.state.roster)}/{self.state.guild_upgrades.roster_capacity}    "
             f"Inventory: {len(self.state.inventory)}"
         )
 
@@ -231,13 +231,17 @@ class InventoryScene:
         pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
         pygame.draw.rect(screen, border_color, row_rect, border_width, border_radius=8)
 
-        equipped = self.equipment_summary(hero)
+        subclass = hero.subclass or "No Subclass"
         line_1 = truncate_text(
-            f"{hero.name} | {hero.hero_class} | Lv {hero.level} | Pwr {hero.combat_power()}",
+            f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level} | Pwr {hero.combat_power()}",
             self.font,
             600,
         )
-        line_2 = truncate_text(f"Equipment: {equipped}", self.small_font, 600)
+        line_2 = truncate_text(
+            f"Age {hero.age} ({hero.career_stage()}) | Ability: {hero.special_ability or 'None'} | Mentor {hero.mentorship_value()}",
+            self.small_font,
+            600,
+        )
 
         screen.blit(self.font.render(line_1, True, (210, 240, 210)), (row_rect.x + 12, row_rect.y + 8))
         screen.blit(self.small_font.render(line_2, True, (180, 210, 180)), (row_rect.x + 12, row_rect.y + 29))
@@ -324,7 +328,7 @@ class InventoryScene:
                 screen.blit(self.small_font.render(item_lines[3], True, (210, 210, 220)), (left_x, y))
 
         y = 562
-        for line in hero_lines[:6]:
+        for line in hero_lines[:7]:
             screen.blit(self.small_font.render(line, True, (210, 210, 220)), (right_x, y))
             y += 20
 
@@ -515,13 +519,11 @@ class InventoryScene:
     def hero_detail_lines(self, hero):
         lines = [
             f"Hero: {hero.name}",
-            f"Class: {hero.hero_class}    Level: {hero.level}    Power: {hero.combat_power()}",
-            (
-                f"Stats: Might {hero.total_stat('might')}    "
-                f"Agility {hero.total_stat('agility')}    "
-                f"Mind {hero.total_stat('mind')}    "
-                f"Spirit {hero.total_stat('spirit')}"
-            ),
+            f"Class: {hero.hero_class}    Subclass: {hero.subclass or 'None'}",
+            f"Ability: {hero.special_ability or 'None'}",
+            f"Age: {hero.age}    Stage: {hero.career_stage()}    Age Power: x{hero.age_power_multiplier():.2f}",
+            f"Level: {hero.level}    Power: {hero.combat_power()}    Mentor: {hero.mentorship_value()}",
+            f"Stats: Might {hero.total_stat('might')}    Agility {hero.total_stat('agility')}    Mind {hero.total_stat('mind')}    Spirit {hero.total_stat('spirit')}",
             truncate_text(f"Equipment: {self.equipment_summary(hero)}", self.small_font, 560),
         ]
 

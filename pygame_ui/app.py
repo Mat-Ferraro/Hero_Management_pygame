@@ -3,6 +3,7 @@ import pygame
 from game_state import create_game
 from save_system import load_game, save_exists, save_game
 
+from pygame_ui.dev_console import DevConsole
 from pygame_ui.scenes.game_hub_scene import GameHubScene
 from pygame_ui.scenes.main_menu_scene import MainMenuScene
 from pygame_ui.scenes.management_scene import ManagementScene
@@ -11,6 +12,7 @@ from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
 from pygame_ui.scenes.inventory_scene import InventoryScene
 from pygame_ui.scenes.market_scene import MarketScene
 from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
+from pygame_ui.scenes.training_scene import TrainingScene
 
 
 class App:
@@ -19,6 +21,7 @@ class App:
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = None
+        self.dev_console = DevConsole(self)
 
         self.show_main_menu()
 
@@ -63,6 +66,7 @@ class App:
             on_open_expedition=self.show_expedition,
             on_open_inventory=self.show_inventory,
             on_open_market=self.show_market,
+            on_open_training=self.show_training,
             on_open_upgrades=self.show_guild_upgrades,
             on_save_game=self.save_current_game,
             on_return_to_menu=self.show_main_menu,
@@ -110,6 +114,17 @@ class App:
             on_save_game=self.save_current_game,
         )
 
+    def show_training(self):
+        if self.state.guild_upgrades.training_hall_level <= 0:
+            self.show_game_hub("Training Hall is locked. Buy the Build Training Hall upgrade first.")
+            return
+
+        self.scene = TrainingScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
     def show_guild_upgrades(self):
         self.scene = GuildUpgradesScene(
             state=self.state,
@@ -129,12 +144,18 @@ class App:
                     self.running = False
                     continue
 
-                self.scene.handle_event(event)
+                handled_by_console = self.dev_console.handle_event(event)
+                if handled_by_console:
+                    continue
+
+                if not self.dev_console.is_open:
+                    self.scene.handle_event(event)
 
             self.scene.update(mouse_pos)
 
             self.screen.fill((28, 28, 32))
             self.scene.draw(self.screen)
+            self.dev_console.draw(self.screen)
 
             pygame.display.flip()
             self.clock.tick(60)
