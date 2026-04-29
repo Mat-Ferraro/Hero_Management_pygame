@@ -1,79 +1,77 @@
-import pygame
-
-from pygame_ui.ui_helpers import clamp_scroll, draw_scrollbar, truncate_text, wrap_text
+from pygame_ui import theme
+from pygame_ui.scenes.scene_base import SceneBase
+from pygame_ui.widgets.details_panel import DetailsPanel
+from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.row_styles import draw_selectable_row
+from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from systems.guild_upgrades import available_upgrades, buy_upgrade
 
 from ..widgets.button import Button
 from ..widgets.panel import Panel
 
 
-class GuildUpgradesScene:
-    UPGRADE_VISIBLE_ROWS = 6
-    UPGRADE_ROW_SPACING = 58
-
-    SCROLLBAR_WIDTH = 8
-    SCROLLBAR_MARGIN = 14
-
+class GuildUpgradesScene(SceneBase):
     def __init__(self, state, on_return_to_hub, on_save_game):
+        super().__init__()
+
         self.state = state
         self.on_return_to_hub = on_return_to_hub
         self.on_save_game = on_save_game
 
-        self.font = pygame.font.SysFont(None, 22)
-        self.small_font = pygame.font.SysFont(None, 20)
-        self.title_font = pygame.font.SysFont(None, 28)
-        self.header_font = pygame.font.SysFont(None, 30)
-
-        self.mouse_pos = (0, 0)
         self.status_message = "Invest in your guild."
-
         self.selected_upgrade_id = None
-        self.upgrade_scroll = 0
 
-        self.header_panel = Panel((20, 16, 1240, 86), "Guild Upgrades")
-        self.upgrades_panel = Panel((20, 120, 720, 430), "Available Upgrades")
         self.status_panel = Panel((760, 120, 500, 430), "Guild Status")
-        self.details_panel = Panel((20, 570, 1240, 135), "Upgrade Details")
+        self.details_panel = DetailsPanel((20, 570, 1240, 135), "Upgrade Details")
 
-        self.upgrade_row_start_y = self.upgrades_panel.rect.y + 60
+        self.upgrades_panel = ScrollableListPanel(
+            rect=(20, 120, 720, 430),
+            title="Available Upgrades",
+            row_height=50,
+            row_spacing=58,
+            visible_rows=6,
+            font=self.font,
+            title_font=self.title_font,
+            padding=14,
+            title_height=60,
+        )
+
+    def sync_lists(self):
+        self.upgrades_panel.set_items(self.available_upgrade_rows())
 
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            for button in self.build_buttons():
-                if button.rect.collidepoint(event.pos):
-                    button.on_click()
-                    return
+        self.sync_lists()
 
+        if self.upgrades_panel.handle_event(event):
+            return
+
+        if self.handle_buttons_click(event, self.build_buttons()):
+            return
+
+        if self.is_left_click(event):
             self.handle_row_click(event.pos)
 
-        elif event.type == pygame.MOUSEWHEEL:
-            if self.upgrades_panel.rect.collidepoint(self.mouse_pos):
-                self.upgrade_scroll -= event.y
-                self.upgrade_scroll = clamp_scroll(
-                    self.upgrade_scroll,
-                    len(self.available_upgrade_rows()),
-                    self.UPGRADE_VISIBLE_ROWS,
-                )
-
     def update(self, mouse_pos):
-        self.mouse_pos = mouse_pos
+        super().update(mouse_pos)
+        self.sync_lists()
+        self.upgrades_panel.update(mouse_pos)
 
     def draw(self, screen):
-        screen.fill((28, 28, 32))
-
-        self.header_panel.draw(screen, self.title_font)
-        self.upgrades_panel.draw(screen, self.title_font)
-        self.status_panel.draw(screen, self.title_font)
-        self.details_panel.draw(screen, self.title_font)
+        self.sync_lists()
+        self.clear_screen(screen)
 
         self.draw_header(screen)
-        self.draw_upgrades(screen)
+
+        self.upgrades_panel.draw(
+            screen=screen,
+            row_drawer=self.draw_upgrade_row,
+            selected_item=self.selected_upgrade_row(),
+            empty_text="No upgrades currently available.",
+        )
+
         self.draw_status(screen)
         self.draw_details(screen)
-
-        for button in self.build_buttons():
-            button.update(self.mouse_pos)
-            button.draw(screen, self.font)
+        self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
         upgrades = self.state.guild_upgrades
@@ -85,76 +83,40 @@ class GuildUpgradesScene:
             f"Crown Stipend: {upgrades.crown_stipend}g"
         )
 
-        screen.blit(self.header_font.render(stats, True, (235, 235, 240)), (40, 56))
+        HeaderPanel(
+            title="Guild Upgrades",
+            stats=stats,
+            status_message=self.status_message,
+        ).draw(screen, self.title_font, self.header_font, self.font)
 
-        if self.status_message:
-            screen.blit(
-                self.font.render(self.status_message, True, (180, 200, 230)),
-                (740, 82),
-            )
+    def draw_upgrade_row(self, screen, row, row_rect, is_selected, is_hovered):
+        upgrade_id, definition = row
 
-    def draw_upgrades(self, screen):
-        rows = self.visible_upgrade_rows()
-
-        if not rows:
-            screen.blit(
-                self.font.render("No upgrades currently available.", True, (180, 180, 190)),
-                (44, self.upgrade_row_start_y + 8),
-            )
-            return
-
-        y = self.upgrade_row_start_y
-        for upgrade_id, definition in rows:
-            self.draw_upgrade_row(screen, upgrade_id, definition, y)
-            y += self.UPGRADE_ROW_SPACING
-
-        draw_scrollbar(
+        draw_selectable_row(
             screen=screen,
-            font=self.font,
-            panel=self.upgrades_panel,
-            scroll=self.upgrade_scroll,
-            item_count=len(self.available_upgrade_rows()),
-            visible_count=self.UPGRADE_VISIBLE_ROWS,
-            width=self.SCROLLBAR_WIDTH,
-            margin=self.SCROLLBAR_MARGIN,
+            rect=row_rect,
+            is_selected=is_selected,
+            is_hovered=is_hovered,
+            style="dark",
         )
-
-    def draw_upgrade_row(self, screen, upgrade_id, definition, y):
-        row_rect = self.upgrade_row_rect(y)
-        is_selected = upgrade_id == self.selected_upgrade_id
-        is_hovered = row_rect.collidepoint(self.mouse_pos)
-
-        if is_selected:
-            fill_color = (58, 58, 76)
-            border_color = (160, 160, 220)
-            border_width = 2
-        elif is_hovered:
-            fill_color = (52, 52, 64)
-            border_color = (110, 110, 135)
-            border_width = 1
-        else:
-            fill_color = (42, 42, 52)
-            border_color = (70, 70, 86)
-            border_width = 1
-
-        pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
-        pygame.draw.rect(screen, border_color, row_rect, border_width, border_radius=8)
 
         name = definition["name"]
         cost = definition["cost"]
         description = definition["description"]
 
         screen.blit(
-            self.font.render(truncate_text(f"{name} - {cost}g", self.font, 560), True, (230, 230, 240)),
+            self.font.render(f"{name} - {cost}g", True, theme.TEXT_PRIMARY),
             (row_rect.x + 12, row_rect.y + 8),
         )
 
         screen.blit(
-            self.small_font.render(truncate_text(description, self.small_font, 560), True, (180, 180, 195)),
+            self.small_font.render(description[:86], True, theme.TEXT_MUTED),
             (row_rect.x + 12, row_rect.y + 32),
         )
 
     def draw_status(self, screen):
+        self.status_panel.draw(screen, self.title_font)
+
         upgrades = self.state.guild_upgrades
 
         lines = [
@@ -170,7 +132,7 @@ class GuildUpgradesScene:
 
         y = 178
         for index, line in enumerate(lines):
-            color = (235, 235, 240) if index == 0 else (200, 200, 215)
+            color = theme.TEXT_PRIMARY if index == 0 else theme.TEXT_SECONDARY
             screen.blit(self.font.render(line, True, color), (790, y))
             y += 30
 
@@ -190,30 +152,34 @@ class GuildUpgradesScene:
                     definition["description"],
                 ]
 
-        y = 614
-        for line in lines:
-            for wrapped in wrap_text(line, self.small_font, 900)[:2]:
-                screen.blit(self.small_font.render(wrapped, True, (210, 210, 220)), (44, y))
-                y += 20
+        self.details_panel.draw_lines(
+            screen=screen,
+            title_font=self.title_font,
+            font=self.small_font,
+            lines=lines,
+            max_width=900,
+        )
 
     def build_buttons(self):
         buttons = [
-            Button((1120, 40, 80, 32), "Hub", self.on_return_to_hub),
+            Button(theme.HUB_BUTTON_RECT, "Hub", self.on_return_to_hub),
         ]
 
         if self.selected_upgrade_id is not None:
-            buttons.append(Button((1010, 642, 190, 42), "Buy Upgrade", self.buy_selected_upgrade))
+            buttons.append(
+                Button(theme.DETAIL_ACTION_BUTTON_RECT, "Buy Upgrade", self.buy_selected_upgrade)
+            )
 
         return buttons
 
     def handle_row_click(self, pos):
-        y = self.upgrade_row_start_y
-        for upgrade_id, definition in self.visible_upgrade_rows():
-            if self.upgrade_row_rect(y).collidepoint(pos):
-                self.selected_upgrade_id = upgrade_id
-                self.status_message = f"Selected upgrade: {definition['name']}"
-                return
-            y += self.UPGRADE_ROW_SPACING
+        row = self.upgrades_panel.item_at_pos(pos)
+        if row is None:
+            return
+
+        upgrade_id, definition = row
+        self.selected_upgrade_id = upgrade_id
+        self.status_message = f"Selected upgrade: {definition['name']}"
 
     def buy_selected_upgrade(self):
         if self.selected_upgrade_id is None:
@@ -222,13 +188,8 @@ class GuildUpgradesScene:
 
         result = buy_upgrade(self.state, self.selected_upgrade_id)
         self.status_message = result
-
         self.selected_upgrade_id = None
-        self.upgrade_scroll = clamp_scroll(
-            self.upgrade_scroll,
-            len(self.available_upgrade_rows()),
-            self.UPGRADE_VISIBLE_ROWS,
-        )
+        self.sync_lists()
 
         if self.on_save_game:
             self.on_save_game()
@@ -236,10 +197,12 @@ class GuildUpgradesScene:
     def available_upgrade_rows(self):
         return available_upgrades(self.state.guild_upgrades)
 
-    def visible_upgrade_rows(self):
-        rows = self.available_upgrade_rows()
-        end = self.upgrade_scroll + self.UPGRADE_VISIBLE_ROWS
-        return rows[self.upgrade_scroll:end]
+    def selected_upgrade_row(self):
+        if self.selected_upgrade_id is None:
+            return None
 
-    def upgrade_row_rect(self, y):
-        return pygame.Rect(34, y - 8, 650, 50)
+        for row in self.available_upgrade_rows():
+            if row[0] == self.selected_upgrade_id:
+                return row
+
+        return None

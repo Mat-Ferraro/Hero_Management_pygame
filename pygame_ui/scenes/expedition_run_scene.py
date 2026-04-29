@@ -3,7 +3,13 @@ import pygame
 from event_system import choose_event_for_enemy
 from expedition_runner import finish_expedition
 from manager_reputation import reputation_for_level_up
-from pygame_ui.ui_helpers import clean_ansi_text, clamp_scroll, draw_scrollbar, truncate_text, wrap_text
+from pygame_ui import theme
+from pygame_ui.scenes.scene_base import SceneBase
+from pygame_ui.ui_helpers import truncate_text, wrap_text
+from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.row_styles import draw_selectable_row
+from pygame_ui.widgets.scrollable_text_panel import ScrollableTextPanel
+from pygame_ui.widgets.panel import Panel
 from systems.campaign_cycle import CampaignCycleManager
 from systems.combat_system import estimate_success_chance
 from systems.mentorship_system import apply_party_mentorship
@@ -16,17 +22,15 @@ from systems.room_system import (
 from systems.survivor_system import remove_temporary_survivors_from_party
 
 from ..widgets.button import Button
-from ..widgets.panel import Panel
 
 
-class ExpeditionRunScene:
-    LOG_VISIBLE_ROWS = 9
-    LOG_ROW_SPACING = 22
-
+class ExpeditionRunScene(SceneBase):
     CHOICE_ROW_HEIGHT = 62
     CHOICE_ROW_SPACING = 70
 
     def __init__(self, state, party, dungeon, on_return_to_hub, on_save_game):
+        super().__init__()
+
         self.state = state
         self.party = party
         self.dispatched_heroes = list(party)
@@ -34,12 +38,6 @@ class ExpeditionRunScene:
         self.on_return_to_hub = on_return_to_hub
         self.on_save_game = on_save_game
 
-        self.font = pygame.font.SysFont(None, 22)
-        self.small_font = pygame.font.SysFont(None, 20)
-        self.title_font = pygame.font.SysFont(None, 28)
-        self.header_font = pygame.font.SysFont(None, 30)
-
-        self.mouse_pos = (0, 0)
         self.status_message = "Choose the next room."
 
         self.room_number = 1
@@ -48,8 +46,6 @@ class ExpeditionRunScene:
         self.xp_earned = 0
 
         self.room_options = []
-        self.log_lines = []
-        self.log_scroll = 0
 
         self.awaiting_continue = False
         self.awaiting_event_choice = False
@@ -58,53 +54,52 @@ class ExpeditionRunScene:
         self.active_event = None
         self.active_event_room_option = None
 
-        self.header_panel = Panel((20, 16, 1240, 86), "Expedition Run")
         self.choice_panel = Panel((20, 120, 520, 290), "Choose Path")
         self.party_panel = Panel((560, 120, 700, 290), "Party Status")
-        self.log_panel = Panel((20, 430, 1240, 260), "Expedition Log")
+
+        self.log_panel = ScrollableTextPanel(
+            rect=(20, 430, 1240, 260),
+            title="Expedition Log",
+            font=self.font,
+            title_font=self.title_font,
+            row_spacing=22,
+            padding=24,
+            title_height=52,
+        )
+
+        self.log_lines = self.log_panel.lines
 
         for hero in self.party:
             hero.reset_health_for_expedition()
             hero.participated_this_cycle = True
 
-        self.log_lines.append(f"Expedition started: {self.dungeon.name}")
+        self.log_panel.append_lines([f"Expedition started: {self.dungeon.name}"], auto_scroll=True)
         self.generate_next_room_options()
 
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            for button in self.build_buttons():
-                if button.rect.collidepoint(event.pos):
-                    button.on_click()
-                    return
+        if self.log_panel.handle_event(event):
+            return
 
-        elif event.type == pygame.MOUSEWHEEL:
-            if self.log_panel.rect.collidepoint(self.mouse_pos):
-                self.log_scroll -= event.y
-                self.log_scroll = clamp_scroll(
-                    self.log_scroll,
-                    len(self.wrapped_log_lines()),
-                    self.LOG_VISIBLE_ROWS,
-                )
+        if self.handle_buttons_click(event, self.build_buttons()):
+            return
 
     def update(self, mouse_pos):
-        self.mouse_pos = mouse_pos
+        super().update(mouse_pos)
+        self.log_panel.update(mouse_pos)
 
     def draw(self, screen):
-        screen.fill((28, 28, 32))
-
-        self.header_panel.draw(screen, self.title_font)
-        self.choice_panel.draw(screen, self.title_font)
-        self.party_panel.draw(screen, self.title_font)
-        self.log_panel.draw(screen, self.title_font)
+        self.clear_screen(screen)
 
         self.draw_header(screen)
+
+        self.choice_panel.draw(screen, self.title_font)
+        self.party_panel.draw(screen, self.title_font)
+
         self.draw_choices(screen)
         self.draw_party(screen)
-        self.draw_log(screen)
+        self.log_panel.draw(screen)
 
-        for button in self.build_buttons():
-            button.update(self.mouse_pos)
-            button.draw(screen, self.font)
+        self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
         stats = (
@@ -115,8 +110,11 @@ class ExpeditionRunScene:
             f"Loot: {self.loot_earned}g    XP: {self.xp_earned}"
         )
 
-        screen.blit(self.header_font.render(stats, True, (235, 235, 240)), (40, 56))
-        screen.blit(self.font.render(self.status_message, True, (180, 200, 230)), (760, 82))
+        HeaderPanel(
+            title="Expedition Run",
+            stats=stats,
+            status_message=self.status_message,
+        ).draw(screen, self.title_font, self.header_font, self.font)
 
     def draw_choices(self, screen):
         if self.expedition_finished:
@@ -134,13 +132,7 @@ class ExpeditionRunScene:
         y = 176
         for index, option in enumerate(self.room_options, start=1):
             row_rect = self.choice_row_rect(y)
-            is_hovered = row_rect.collidepoint(self.mouse_pos)
-
-            fill_color = (50, 50, 62) if is_hovered else (42, 42, 52)
-            border_color = (110, 110, 135) if is_hovered else (70, 70, 86)
-
-            pygame.draw.rect(screen, fill_color, row_rect, border_radius=8)
-            pygame.draw.rect(screen, border_color, row_rect, 1, border_radius=8)
+            draw_selectable_row(screen, row_rect, False, row_rect.collidepoint(self.mouse_pos), style="dark")
 
             text = f"{index}. {option.room_type}: {option.description}"
 
@@ -154,7 +146,7 @@ class ExpeditionRunScene:
 
             line_y = row_rect.y + 9
             for line in wrapped[:2]:
-                screen.blit(self.small_font.render(line, True, (220, 220, 230)), (row_rect.x + 12, line_y))
+                screen.blit(self.small_font.render(line, True, theme.TEXT_SECONDARY), (row_rect.x + 12, line_y))
                 line_y += 20
 
             y += self.CHOICE_ROW_SPACING
@@ -172,7 +164,7 @@ class ExpeditionRunScene:
         wrapped_description = wrap_text(description, self.small_font, 430)
         y = 200
         for line in wrapped_description[:2]:
-            screen.blit(self.small_font.render(line, True, (220, 220, 230)), (44, y))
+            screen.blit(self.small_font.render(line, True, theme.TEXT_SECONDARY), (44, y))
             y += 20
 
         y = 250
@@ -181,7 +173,7 @@ class ExpeditionRunScene:
             wrapped = wrap_text(f"{index}. {label}", self.small_font, 310)
 
             for line in wrapped[:2]:
-                screen.blit(self.small_font.render(line, True, (210, 210, 220)), (58, y))
+                screen.blit(self.small_font.render(line, True, theme.TEXT_SECONDARY), (58, y))
                 y += 20
 
             y += 18
@@ -191,7 +183,7 @@ class ExpeditionRunScene:
         y = 178
 
         for line in wrapped:
-            screen.blit(self.font.render(line, True, (210, 210, 220)), (44, y))
+            screen.blit(self.font.render(line, True, theme.TEXT_SECONDARY), (44, y))
             y += 24
 
     def draw_party(self, screen):
@@ -219,24 +211,6 @@ class ExpeditionRunScene:
             rendered = truncate_text(line, self.font, 620)
             screen.blit(self.font.render(rendered, True, color), (584, y))
             y += 32
-
-    def draw_log(self, screen):
-        display_lines = self.wrapped_log_lines()
-        visible = display_lines[self.log_scroll:self.log_scroll + self.LOG_VISIBLE_ROWS]
-
-        y = 482
-        for line in visible:
-            screen.blit(self.font.render(line, True, (210, 210, 220)), (44, y))
-            y += self.LOG_ROW_SPACING
-
-        draw_scrollbar(
-            screen=screen,
-            font=self.font,
-            panel=self.log_panel,
-            scroll=self.log_scroll,
-            item_count=len(display_lines),
-            visible_count=self.LOG_VISIBLE_ROWS,
-        )
 
     def build_buttons(self):
         buttons = [Button((1120, 40, 90, 32), "Hub", self.return_to_hub)]
@@ -342,11 +316,10 @@ class ExpeditionRunScene:
             if resolution.loot > 0:
                 room_messages.append(f"Gold after recovered room loot: {self.state.gold}g.")
 
-        self.log_lines.extend(room_messages)
-        self.scroll_log_to_bottom()
+        self.log_panel.append_lines(room_messages, auto_scroll=True)
 
         if not self.party:
-            self.log_lines.append("The expedition ends because the entire party is gone.")
+            self.log_panel.append_lines(["The expedition ends because the entire party is gone."], auto_scroll=True)
             self.finish_expedition_run(completed=False)
             return
 
@@ -364,7 +337,7 @@ class ExpeditionRunScene:
         self.generate_next_room_options()
 
     def retreat(self):
-        self.log_lines.append(f"The party retreats after completing {self.rooms_completed} room(s).")
+        self.log_panel.append_lines([f"The party retreats after completing {self.rooms_completed} room(s)."], auto_scroll=True)
         self.finish_expedition_run(completed=False)
 
     def finish_expedition_run(self, completed):
@@ -372,74 +345,56 @@ class ExpeditionRunScene:
         self.awaiting_continue = False
         self.awaiting_event_choice = False
 
-        self.log_lines.append(f"Total recovered expedition loot: {self.loot_earned}g.")
-        self.log_lines.append(f"Total recovered combat XP: {self.xp_earned}.")
+        messages = [
+            f"Total recovered expedition loot: {self.loot_earned}g.",
+            f"Total recovered combat XP: {self.xp_earned}.",
+        ]
 
         if completed and self.party:
-            self.log_lines.append("The dungeon route was completed!")
+            messages.append("The dungeon route was completed!")
+
+        self.log_panel.append_lines(messages, auto_scroll=True)
 
         self.apply_xp_and_cleanup()
         self.apply_mentorship()
 
         cycle_manager = CampaignCycleManager(self.state)
-        self.log_lines.extend(cycle_manager.advance_cycle(self.dispatched_heroes))
+        self.log_panel.append_lines(cycle_manager.advance_cycle(self.dispatched_heroes), auto_scroll=True)
 
-        self.log_lines.extend(finish_expedition(self.state, self.dungeon))
+        self.log_panel.append_lines(finish_expedition(self.state, self.dungeon), auto_scroll=True)
 
         if self.on_save_game is not None:
             self.on_save_game()
 
         self.status_message = "Expedition complete. Campaign cycle resolved and saved."
-        self.scroll_log_to_bottom()
+        self.log_panel.scroll_to_bottom()
 
     def apply_xp_and_cleanup(self):
+        messages = []
+
         for hero in list(self.party):
             if hero.is_temporary_survivor:
                 continue
 
             old_level = hero.level
             xp_messages = hero.add_xp(self.xp_earned)
-
-            for message in xp_messages:
-                self.log_lines.append(message)
+            messages.extend(xp_messages)
 
             if hero.level > old_level:
                 for _ in range(hero.level - old_level):
-                    self.log_lines.extend(reputation_for_level_up(self.state.reputation, hero.hero_class))
+                    messages.extend(reputation_for_level_up(self.state.reputation, hero.hero_class))
 
-        self.log_lines.extend(remove_temporary_survivors_from_party(self.state, self.party))
+        messages.extend(remove_temporary_survivors_from_party(self.state, self.party))
+        self.log_panel.append_lines(messages, auto_scroll=True)
 
     def apply_mentorship(self):
         mentorship_messages = apply_party_mentorship(self.party, self.xp_earned)
 
         if mentorship_messages:
-            self.log_lines.append("=== Mentorship ===")
-            self.log_lines.extend(mentorship_messages)
+            self.log_panel.append_lines(["=== Mentorship ==="] + mentorship_messages, auto_scroll=True)
 
     def return_to_hub(self):
         self.on_return_to_hub("Returned from expedition.")
-
-    def wrapped_log_lines(self):
-        display_lines = []
-
-        for line in self.log_lines:
-            clean = clean_ansi_text(line)
-            wrapped = wrap_text(clean, self.font, 1120)
-
-            if wrapped:
-                display_lines.extend(wrapped)
-            else:
-                display_lines.append("")
-
-        return display_lines
-
-    def scroll_log_to_bottom(self):
-        display_lines = self.wrapped_log_lines()
-        self.log_scroll = clamp_scroll(
-            max(0, len(display_lines) - self.LOG_VISIBLE_ROWS),
-            len(display_lines),
-            self.LOG_VISIBLE_ROWS,
-        )
 
     def choice_row_rect(self, y):
         return pygame.Rect(44, y - 10, 470, self.CHOICE_ROW_HEIGHT)

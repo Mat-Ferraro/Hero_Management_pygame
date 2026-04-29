@@ -1,5 +1,7 @@
 import pygame
 
+from pygame_ui import theme
+
 
 class Button:
     def __init__(self, rect, text, on_click):
@@ -29,16 +31,16 @@ class Button:
         self.hovered = self.rect.collidepoint(mouse_pos)
 
     def draw(self, screen, font):
-        color = (80, 80, 105)
+        color = theme.BUTTON_BG
 
         if self.pressed_inside:
-            color = (60, 60, 85)
+            color = theme.BUTTON_BG_PRESSED
         elif self.hovered:
-            color = (110, 110, 145)
+            color = theme.BUTTON_BG_HOVER
 
         pygame.draw.rect(screen, color, self.rect, border_radius=8)
-        pygame.draw.rect(screen, (210, 210, 230), self.rect, 2, border_radius=8)
+        pygame.draw.rect(screen, theme.BUTTON_BORDER, self.rect, 2, border_radius=8)
 
-        text_surface = font.render(self.text, True, (255, 255, 255))
+        text_surface = font.render(self.text, True, theme.BUTTON_TEXT)
         text_rect = text_surface.get_rect(center=self.rect.center)
         screen.blit(text_surface, text_rect)

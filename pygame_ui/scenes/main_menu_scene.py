@@ -1,10 +1,15 @@
 import pygame
 
+from pygame_ui import theme
+from pygame_ui.scenes.scene_base import SceneBase
+
 from ..widgets.button import Button
 
 
-class MainMenuScene:
+class MainMenuScene(SceneBase):
     def __init__(self, on_start_new_game, on_load_game, on_quit):
+        super().__init__()
+
         self.on_start_new_game = on_start_new_game
         self.on_load_game = on_load_game
         self.on_quit = on_quit
@@ -13,21 +18,13 @@ class MainMenuScene:
         self.subtitle_font = pygame.font.SysFont(None, 28)
         self.button_font = pygame.font.SysFont(None, 30)
 
-        self.mouse_pos = (0, 0)
         self.status_message = ""
 
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            for button in self.build_buttons():
-                if button.rect.collidepoint(event.pos):
-                    button.on_click()
-                    return
-
-    def update(self, mouse_pos):
-        self.mouse_pos = mouse_pos
+        self.handle_buttons_click(event, self.build_buttons())
 
     def draw(self, screen):
-        screen.fill((24, 24, 30))
+        self.clear_screen(screen, theme.MAIN_MENU_BG)
 
         title = self.title_font.render("Hero Management", True, (245, 245, 250))
         title_rect = title.get_rect(center=(640, 170))
@@ -36,17 +33,15 @@ class MainMenuScene:
         subtitle = self.subtitle_font.render(
             "Build a guild. Sign heroes. Risk lives for treasure.",
             True,
-            (180, 180, 195),
+            theme.TEXT_MUTED,
         )
         subtitle_rect = subtitle.get_rect(center=(640, 230))
         screen.blit(subtitle, subtitle_rect)
 
-        for button in self.build_buttons():
-            button.update(self.mouse_pos)
-            button.draw(screen, self.button_font)
+        self.update_and_draw_buttons(screen, self.build_buttons(), self.button_font)
 
         if self.status_message:
-            status = self.subtitle_font.render(self.status_message, True, (210, 180, 180))
+            status = self.subtitle_font.render(self.status_message, True, theme.TEXT_WARNING)
             status_rect = status.get_rect(center=(640, 520))
             screen.blit(status, status_rect)
 

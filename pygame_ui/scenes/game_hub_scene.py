@@ -1,10 +1,12 @@
-import pygame
+from pygame_ui import theme
+from pygame_ui.scenes.scene_base import SceneBase
+from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.panel import Panel
 
 from ..widgets.button import Button
-from ..widgets.panel import Panel
 
 
-class GameHubScene:
+class GameHubScene(SceneBase):
     def __init__(
         self,
         state,
@@ -18,6 +20,8 @@ class GameHubScene:
         on_return_to_menu,
         status_message="",
     ):
+        super().__init__()
+
         self.state = state
         self.on_open_guild = on_open_guild
         self.on_open_expedition = on_open_expedition
@@ -29,31 +33,21 @@ class GameHubScene:
         self.on_return_to_menu = on_return_to_menu
         self.status_message = status_message
 
-        self.mouse_pos = (0, 0)
-
-        self.header_font = pygame.font.SysFont(None, 30)
-        self.font = pygame.font.SysFont(None, 24)
-        self.button_font = pygame.font.SysFont(None, 28)
-
-        self.header_panel = Panel((40, 40, 1200, 110), "Guild Hall")
+        self.button_font = self.title_font
         self.main_panel = Panel((40, 180, 1200, 500), "Choose Destination")
 
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            for button in self.build_buttons():
-                if button.rect.collidepoint(event.pos):
-                    button.on_click()
-                    return
-
-    def update(self, mouse_pos):
-        self.mouse_pos = mouse_pos
+        self.handle_buttons_click(event, self.build_buttons())
 
     def draw(self, screen):
-        screen.fill((28, 28, 32))
+        self.clear_screen(screen)
+        self.draw_header(screen)
 
-        self.header_panel.draw(screen, self.header_font)
-        self.main_panel.draw(screen, self.header_font)
+        self.main_panel.draw(screen, self.title_font)
+        self.draw_descriptions(screen)
+        self.update_and_draw_buttons(screen, self.build_buttons(), self.button_font)
 
+    def draw_header(self, screen):
         upgrades = self.state.guild_upgrades
         market_status = "Open" if upgrades.market_unlocked else "Locked"
         training_status = f"Lv {upgrades.training_hall_level}" if upgrades.training_hall_level > 0 else "Locked"
@@ -66,10 +60,14 @@ class GameHubScene:
             f"Classes: {', '.join(upgrades.unlocked_classes)}"
         )
 
-        screen.blit(
-            self.header_font.render(stats, True, (235, 235, 240)),
-            (70, 92),
-        )
+        HeaderPanel(
+            rect=(40, 40, 1200, 110),
+            title="Guild Hall",
+            stats=stats,
+            status_message=self.status_message,
+            stats_pos=(70, 92),
+            status_pos=(560, 150),
+        ).draw(screen, self.title_font, self.header_font, self.font)
 
         second_line = (
             f"Recruit Cap: Lv {upgrades.recruit_level_cap}    "
@@ -80,21 +78,9 @@ class GameHubScene:
         )
 
         screen.blit(
-            self.font.render(second_line, True, (190, 190, 205)),
+            self.font.render(second_line, True, theme.TEXT_MUTED),
             (70, 122),
         )
-
-        if self.status_message:
-            screen.blit(
-                self.font.render(self.status_message, True, (180, 200, 230)),
-                (560, 150),
-            )
-
-        for button in self.build_buttons():
-            button.update(self.mouse_pos)
-            button.draw(screen, self.button_font)
-
-        self.draw_descriptions(screen)
 
     def draw_descriptions(self, screen):
         market_text = "Buy equipment using guild gold."
@@ -117,7 +103,7 @@ class GameHubScene:
         y = 475
         for title, description in descriptions:
             text = f"{title}: {description}"
-            screen.blit(self.font.render(text, True, (190, 190, 205)), (260, y))
+            screen.blit(self.font.render(text, True, theme.TEXT_MUTED), (260, y))
             y += 28
 
     def build_buttons(self):
