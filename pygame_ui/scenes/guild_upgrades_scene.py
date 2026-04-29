@@ -1,12 +1,17 @@
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
-from pygame_ui.widgets.details_panel import DetailsPanel
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
+from pygame_ui.widgets.navigation_buttons import action_button, hub_button
+from pygame_ui.widgets.resource_header import ResourceHeader
+from pygame_ui.widgets.section_title import SectionTitle
+from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
+from pygame_ui.widgets.status_chip import StatusChip
+from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from systems.guild_upgrades import available_upgrades, buy_upgrade
 
-from ..widgets.button import Button
 from ..widgets.panel import Panel
 
 
@@ -22,14 +27,21 @@ class GuildUpgradesScene(SceneBase):
         self.selected_upgrade_id = None
 
         self.status_panel = Panel((760, 120, 500, 430), "Guild Status")
-        self.details_panel = DetailsPanel((20, 570, 1240, 135), "Upgrade Details")
+
+        self.details_panel = SelectionDetailsPanel(
+            rect=(20, 570, 1240, 135),
+            title="Upgrade Details",
+            empty_message="Select an upgrade to inspect it.",
+            left_width=560,
+            right_width=560,
+        )
 
         self.upgrades_panel = ScrollableListPanel(
             rect=(20, 120, 720, 430),
             title="Available Upgrades",
-            row_height=50,
-            row_spacing=58,
-            visible_rows=6,
+            row_height=58,
+            row_gap=8,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
             padding=14,
@@ -76,18 +88,21 @@ class GuildUpgradesScene(SceneBase):
     def draw_header(self, screen):
         upgrades = self.state.guild_upgrades
 
-        stats = (
-            f"Gold: {self.state.gold}g    "
-            f"Roster: {len(self.state.roster)}/{upgrades.roster_capacity}    "
-            f"Recruit Cap: Lv {upgrades.recruit_level_cap}    "
-            f"Crown Stipend: {upgrades.crown_stipend}g"
-        )
-
         HeaderPanel(
             title="Guild Upgrades",
-            stats=stats,
+            stats="",
             status_message=self.status_message,
         ).draw(screen, self.title_font, self.header_font, self.font)
+
+        ResourceHeader(
+            resources=[
+                ("Gold", f"{self.state.gold}g"),
+                ("Roster", f"{len(self.state.roster)}/{upgrades.roster_capacity}"),
+                ("Recruit", f"Lv {upgrades.recruit_level_cap}"),
+                ("Stipend", f"{upgrades.crown_stipend}g"),
+            ],
+            spacing=185,
+        ).draw(screen, self.font, 40, 58)
 
     def draw_upgrade_row(self, screen, row, row_rect, is_selected, is_hovered):
         upgrade_id, definition = row
@@ -105,13 +120,27 @@ class GuildUpgradesScene(SceneBase):
         description = definition["description"]
 
         screen.blit(
-            self.font.render(f"{name} - {cost}g", True, theme.TEXT_PRIMARY),
+            self.font.render(name, True, theme.TEXT_PRIMARY),
             (row_rect.x + 12, row_rect.y + 8),
         )
 
-        screen.blit(
-            self.small_font.render(description[:86], True, theme.TEXT_MUTED),
-            (row_rect.x + 12, row_rect.y + 32),
+        StatusChip(
+            rect=(row_rect.right - 92, row_rect.y + 8, 78, 24),
+            text=f"{cost}g",
+            style="warning" if cost > self.state.gold else "good",
+        ).draw(screen, self.small_font)
+
+        TextBlock(
+            lines=[description],
+            color=theme.TEXT_MUTED,
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 12,
+            y=row_rect.y + 36,
+            max_width=row_rect.width - 120,
         )
 
     def draw_status(self, screen):
@@ -119,56 +148,108 @@ class GuildUpgradesScene(SceneBase):
 
         upgrades = self.state.guild_upgrades
 
-        lines = [
-            "Current Guild Capabilities",
-            f"Roster Capacity: {len(self.state.roster)}/{upgrades.roster_capacity}",
-            f"Unlocked Classes: {', '.join(upgrades.unlocked_classes)}",
-            f"Recruit Level Cap: {upgrades.recruit_level_cap}",
-            f"Market: {'Unlocked' if upgrades.market_unlocked else 'Locked'}",
-            f"Market Rarity Cap: {upgrades.market_rarity_cap}",
-            f"Mission Difficulty Cap: {upgrades.mission_difficulty_cap}",
-            f"Crown Stipend: {upgrades.crown_stipend}g / campaign",
+        SectionTitle(
+            "Current Capabilities",
+            "Your guild infrastructure determines long-term growth.",
+        ).draw(
+            screen=screen,
+            title_font=self.font,
+            subtitle_font=self.small_font,
+            x=790,
+            y=174,
+        )
+
+        grid_rows = [
+            ("Roster", f"{len(self.state.roster)}/{upgrades.roster_capacity}"),
+            ("Classes", ", ".join(upgrades.unlocked_classes)),
+            ("Recruit Cap", f"Lv {upgrades.recruit_level_cap}"),
+            ("Market", "Unlocked" if upgrades.market_unlocked else "Locked"),
+            ("Rarity Cap", upgrades.market_rarity_cap),
+            ("Mission Cap", f"Diff {upgrades.mission_difficulty_cap}"),
+            ("Stipend", f"{upgrades.crown_stipend}g"),
+            ("Training", f"Lv {upgrades.training_hall_level}"),
         ]
 
-        y = 178
-        for index, line in enumerate(lines):
-            color = theme.TEXT_PRIMARY if index == 0 else theme.TEXT_SECONDARY
-            screen.blit(self.font.render(line, True, color), (790, y))
-            y += 30
+        KeyValueGrid(
+            rows=grid_rows,
+            columns=1,
+            label_width=120,
+            column_width=430,
+            row_spacing=24,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=790,
+            y=235,
+        )
+
+        self.draw_unlock_chips(screen, upgrades)
+
+    def draw_unlock_chips(self, screen, upgrades):
+        y = 498
+        x = 790
+
+        chips = [
+            ("Market", "good" if upgrades.market_unlocked else "locked"),
+            ("Training", "good" if upgrades.training_hall_level > 0 else "locked"),
+            (f"Mission {upgrades.mission_difficulty_cap}", "info"),
+            (f"Roster {upgrades.roster_capacity}", "info"),
+        ]
+
+        for label, style in chips:
+            StatusChip((x, y, 105, 26), label, style).draw(screen, self.small_font)
+            x += 115
 
     def draw_details(self, screen):
         if self.selected_upgrade_id is None:
-            lines = [
-                "Select an upgrade to inspect it.",
-                "Guild upgrades are your main tycoon progression layer.",
-            ]
-        else:
-            definition = dict(self.available_upgrade_rows()).get(self.selected_upgrade_id)
-            if definition is None:
-                lines = ["Selected upgrade is no longer available."]
-            else:
-                lines = [
-                    f"{definition['name']} - {definition['cost']}g",
-                    definition["description"],
-                ]
+            self.details_panel.draw(
+                screen=screen,
+                title_font=self.title_font,
+                font=self.small_font,
+                left_lines=[],
+                right_lines=[],
+            )
+            return
 
-        self.details_panel.draw_lines(
+        definition = dict(self.available_upgrade_rows()).get(self.selected_upgrade_id)
+        if definition is None:
+            self.details_panel.draw_lines(
+                screen=screen,
+                title_font=self.title_font,
+                font=self.small_font,
+                lines=["Selected upgrade is no longer available."],
+                max_width=900,
+            )
+            return
+
+        cost = definition["cost"]
+        can_afford = self.state.gold >= cost
+
+        left_lines = [
+            f"Upgrade: {definition['name']}",
+            f"Cost: {cost}g",
+            f"Status: {'Affordable' if can_afford else 'Not enough gold'}",
+        ]
+
+        right_lines = [
+            definition["description"],
+        ]
+
+        self.details_panel.draw(
             screen=screen,
             title_font=self.title_font,
             font=self.small_font,
-            lines=lines,
-            max_width=900,
+            left_lines=left_lines,
+            right_lines=right_lines,
         )
 
     def build_buttons(self):
         buttons = [
-            Button(theme.HUB_BUTTON_RECT, "Hub", self.on_return_to_hub),
+            hub_button(self.on_return_to_hub),
         ]
 
         if self.selected_upgrade_id is not None:
-            buttons.append(
-                Button(theme.DETAIL_ACTION_BUTTON_RECT, "Buy Upgrade", self.buy_selected_upgrade)
-            )
+            buttons.append(action_button("Buy Upgrade", self.buy_selected_upgrade))
 
         return buttons
 

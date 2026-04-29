@@ -1,12 +1,17 @@
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
-from pygame_ui.widgets.details_panel import DetailsPanel
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.item_summary import ItemSummaryBlock
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
+from pygame_ui.widgets.meter_row import MeterRow
+from pygame_ui.widgets.navigation_buttons import action_button, hub_button
+from pygame_ui.widgets.resource_header import ResourceHeader
+from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
+from pygame_ui.widgets.status_chip import StatusChip
+from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
-
-from ..widgets.button import Button
 
 
 class InventoryScene(SceneBase):
@@ -23,14 +28,20 @@ class InventoryScene(SceneBase):
         self.selected_hero = None
         self.selected_equipment_slot = None
 
-        self.details_panel = DetailsPanel((20, 520, 1240, 185), "Selection Details")
+        self.details_panel = SelectionDetailsPanel(
+            rect=(20, 520, 1240, 185),
+            title="Selection Details",
+            empty_message="Select an item or hero to inspect.",
+            left_width=540,
+            right_width=560,
+        )
 
         self.items_panel = ScrollableListPanel(
             rect=(20, 120, 520, 380),
             title="Items",
-            row_height=44,
-            row_spacing=52,
-            visible_rows=5,
+            row_height=60,
+            row_gap=8,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
             padding=14,
@@ -40,9 +51,9 @@ class InventoryScene(SceneBase):
         self.heroes_panel = ScrollableListPanel(
             rect=(560, 120, 700, 270),
             title="Heroes",
-            row_height=44,
-            row_spacing=52,
-            visible_rows=5,
+            row_height=60,
+            row_gap=8,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
             padding=24,
@@ -52,9 +63,9 @@ class InventoryScene(SceneBase):
         self.equipment_panel = ScrollableListPanel(
             rect=(560, 410, 700, 90),
             title="Selected Hero Equipment",
-            row_height=28,
-            row_spacing=34,
-            visible_rows=3,
+            row_height=32,
+            row_gap=6,
+            visible_rows=None,
             font=self.small_font,
             title_font=self.title_font,
             padding=24,
@@ -123,17 +134,21 @@ class InventoryScene(SceneBase):
         self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
-        stats = (
-            f"Gold: {self.state.gold}g    "
-            f"Roster: {len(self.state.roster)}/{self.state.guild_upgrades.roster_capacity}    "
-            f"Inventory: {len(self.state.inventory)}"
-        )
-
         HeaderPanel(
             title="Inventory",
-            stats=stats,
+            stats="",
             status_message=self.status_message,
         ).draw(screen, self.title_font, self.header_font, self.font)
+
+        ResourceHeader(
+            resources=[
+                ("Gold", f"{self.state.gold}g"),
+                ("Roster", f"{len(self.state.roster)}/{self.state.guild_upgrades.roster_capacity}"),
+                ("Items", len(self.state.inventory)),
+                ("Equipped", self.total_equipped_items()),
+            ],
+            spacing=185,
+        ).draw(screen, self.font, 40, 58)
 
     def draw_item_row(self, screen, item, row_rect, is_selected, is_hovered):
         draw_selectable_row(
@@ -144,44 +159,102 @@ class InventoryScene(SceneBase):
             style="dark",
         )
 
-        line_1 = truncate_text(
-            f"{item.name} [{item.rarity} {item.slot}]",
-            self.font,
-            row_rect.width - 24,
-        )
-        line_2 = truncate_text(
-            f"Value {item.value}g",
-            self.small_font,
-            row_rect.width - 24,
+        screen.blit(
+            self.font.render(
+                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 110),
+                True,
+                theme.TEXT_PRIMARY,
+            ),
+            (row_rect.x + 12, row_rect.y + 7),
         )
 
-        screen.blit(self.font.render(line_1, True, theme.TEXT_PRIMARY), (row_rect.x + 12, row_rect.y + 8))
-        screen.blit(self.small_font.render(line_2, True, theme.TEXT_MUTED), (row_rect.x + 12, row_rect.y + 29))
+        StatusChip(
+            rect=(row_rect.right - 92, row_rect.y + 7, 78, 24),
+            text=f"{item.value}g",
+            style="warning" if item.value >= 250 else "good",
+        ).draw(screen, self.small_font)
+
+        StatusChip(
+            rect=(row_rect.x + 12, row_rect.y + 34, 84, 22),
+            text=item.slot,
+            style="info",
+        ).draw(screen, self.small_font)
+
+        TextBlock(
+            lines=[self.item_bonus_summary(item)],
+            color=theme.TEXT_MUTED,
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 106,
+            y=row_rect.y + 37,
+            max_width=row_rect.width - 124,
+        )
 
     def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
+        can_equip_selected_item = True
+
+        if self.selected_item is not None:
+            can_equip_selected_item = self.selected_item.can_equip(hero.hero_class)
+
+        row_style = "green" if can_equip_selected_item else "dark"
+
         draw_selectable_row(
             screen=screen,
             rect=row_rect,
             is_selected=is_selected,
             is_hovered=is_hovered,
-            style="green",
+            style=row_style,
         )
 
-        subclass = hero.subclass or "No Subclass"
+        subclass = hero.subclass or "Base"
+        health_style = self.health_chip_style(hero)
 
-        line_1 = truncate_text(
-            f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level} | Pwr {hero.combat_power()}",
-            self.font,
-            row_rect.width - 24,
-        )
-        line_2 = truncate_text(
-            f"Age {hero.age} ({hero.career_stage()}) | Ability: {hero.special_ability or 'None'} | Mentor {hero.mentorship_value()}",
-            self.small_font,
-            row_rect.width - 24,
+        name_color = (210, 240, 210) if can_equip_selected_item else theme.TEXT_MUTED
+        detail_color = (180, 210, 180) if can_equip_selected_item else (145, 145, 155)
+
+        screen.blit(
+            self.font.render(
+                truncate_text(
+                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
+                    self.font,
+                    row_rect.width - 220,
+                ),
+                True,
+                name_color,
+            ),
+            (row_rect.x + 12, row_rect.y + 7),
         )
 
-        screen.blit(self.font.render(line_1, True, (210, 240, 210)), (row_rect.x + 12, row_rect.y + 8))
-        screen.blit(self.small_font.render(line_2, True, (180, 210, 180)), (row_rect.x + 12, row_rect.y + 29))
+        eligibility_text = "Eligible" if can_equip_selected_item else "Cannot Equip"
+        eligibility_style = "good" if can_equip_selected_item else "danger"
+
+        StatusChip(
+            rect=(row_rect.right - 205, row_rect.y + 7, 92, 24),
+            text=eligibility_text if self.selected_item is not None else hero.health_status(),
+            style=eligibility_style if self.selected_item is not None else health_style,
+        ).draw(screen, self.small_font)
+
+        StatusChip(
+            rect=(row_rect.right - 104, row_rect.y + 7, 90, 24),
+            text=f"Pwr {hero.combat_power()}",
+            style="info",
+        ).draw(screen, self.small_font)
+
+        screen.blit(
+            self.small_font.render(
+                truncate_text(
+                    f"Age {hero.age} ({hero.career_stage()}) | Mentor {hero.mentorship_value()} | Equipped {len(hero.equipment)}",
+                    self.small_font,
+                    row_rect.width - 24,
+                ),
+                True,
+                detail_color,
+            ),
+            (row_rect.x + 12, row_rect.y + 37),
+        )
 
     def draw_equipment_row(self, screen, row, row_rect, is_selected, is_hovered):
         slot, item = row
@@ -194,41 +267,57 @@ class InventoryScene(SceneBase):
             style="brown",
         )
 
-        line = truncate_text(
-            f"{slot}: {item.name} [{item.rarity}]",
-            self.small_font,
-            row_rect.width - 20,
-        )
+        StatusChip(
+            rect=(row_rect.x + 8, row_rect.y + 5, 84, 22),
+            text=slot,
+            style="info",
+        ).draw(screen, self.small_font)
 
-        screen.blit(self.small_font.render(line, True, (230, 220, 200)), (row_rect.x + 10, row_rect.y + 8))
+        screen.blit(
+            self.small_font.render(
+                truncate_text(f"{item.name} [{item.rarity}]", self.small_font, row_rect.width - 116),
+                True,
+                (230, 220, 200),
+            ),
+            (row_rect.x + 104, row_rect.y + 8),
+        )
 
     def draw_details(self, screen):
         detail_item = self.selected_item
+
         if detail_item is None and self.selected_hero and self.selected_equipment_slot:
             detail_item = self.selected_hero.equipment.get(self.selected_equipment_slot)
 
-        item_lines = self.item_detail_lines(detail_item) if detail_item else ["Item: None selected"]
-        hero_lines = self.hero_detail_lines(self.selected_hero) if self.selected_hero else ["Hero: None selected"]
+        if detail_item is None and self.selected_hero is None:
+            self.details_panel.draw(
+                screen=screen,
+                title_font=self.title_font,
+                font=self.small_font,
+                left_lines=[],
+                right_lines=[],
+            )
+            return
 
-        self.details_panel.draw_two_columns(
+        left_lines = self.item_detail_lines(detail_item) if detail_item else ["Item: None selected"]
+        right_lines = self.hero_detail_lines(self.selected_hero) if self.selected_hero else ["Hero: None selected"]
+
+        self.details_panel.draw(
             screen=screen,
             title_font=self.title_font,
             font=self.small_font,
-            left_lines=item_lines,
-            right_lines=hero_lines,
-            left_width=540,
-            right_width=560,
+            left_lines=left_lines,
+            right_lines=right_lines,
         )
 
     def build_buttons(self):
         buttons = [
-            Button(theme.HUB_BUTTON_RECT, "Hub", self.on_return_to_hub),
+            hub_button(self.on_return_to_hub),
         ]
 
         if self.selected_item and self.selected_hero:
-            buttons.append(Button(theme.DETAIL_ACTION_BUTTON_RECT, "Equip Item", self.equip_selected_item))
+            buttons.append(action_button("Equip Item", self.equip_selected_item))
         elif self.selected_hero and self.selected_equipment_slot:
-            buttons.append(Button(theme.DETAIL_ACTION_BUTTON_RECT, "Unequip Item", self.unequip_selected_item))
+            buttons.append(action_button("Unequip Item", self.unequip_selected_item))
 
         return buttons
 
@@ -340,40 +429,66 @@ class InventoryScene(SceneBase):
 
         return f"{self.selected_hero.name} has no equipped items."
 
+    def total_equipped_items(self):
+        return sum(len(hero.equipment) for hero in self.state.roster)
+
     def equipment_summary(self, hero):
         if not hero.equipment:
             return "None"
 
         return ", ".join(f"{slot}: {item.name}" for slot, item in hero.equipment.items())
 
-    def item_detail_lines(self, item):
-        lines = [
-            f"Item: {item.name}",
-            f"Slot: {item.slot}    Rarity: {item.rarity}    Value: {item.value}g",
-        ]
+    def health_chip_style(self, hero):
+        if hero.health_status() in ("DEAD", "CRITICAL"):
+            return "danger"
 
-        bonus_parts = []
+        if hero.health_status() in ("WOUNDED", "HURT"):
+            return "warning"
+
+        if hero.injured_years_remaining > 0:
+            return "warning"
+
+        return "good"
+
+    def item_bonus_summary(self, item):
+        if item is None:
+            return "No item selected"
+
+        parts = []
+
         for stat, value in item.stat_bonuses.items():
-            bonus_parts.append(f"+{value} {stat}")
+            parts.append(f"+{value} {stat}")
 
         for damage, value in item.damage_type_bonus.items():
-            bonus_parts.append(f"+{int(value * 100)}% {damage} damage")
+            parts.append(f"+{int(value * 100)}% {damage} dmg")
 
         for enemy, value in item.enemy_type_bonus.items():
-            bonus_parts.append(f"+{int(value * 100)}% vs {enemy}")
+            parts.append(f"+{int(value * 100)}% vs {enemy}")
 
         for enemy, value in item.enemy_type_resistance.items():
-            bonus_parts.append(f"-{int(value * 100)}% damage from {enemy}")
+            parts.append(f"-{int(value * 100)}% dmg from {enemy}")
 
-        detail = "; ".join(bonus_parts) if bonus_parts else "No bonuses"
+        return "; ".join(parts) if parts else "No bonuses"
+
+    def item_detail_lines(self, item):
+        if item is None:
+            return ["Item: None selected"]
+
         classes = ", ".join(item.class_restrictions) if item.class_restrictions else "Any"
 
-        lines.append(f"Bonuses: {detail}")
-        lines.append(f"Classes: {classes}")
-
-        return lines
+        return [
+            f"Item: {item.name}",
+            f"Slot: {item.slot}",
+            f"Rarity: {item.rarity}",
+            f"Value: {item.value}g",
+            f"Classes: {classes}",
+            f"Bonuses: {self.item_bonus_summary(item)}",
+        ]
 
     def hero_detail_lines(self, hero):
+        if hero is None:
+            return ["Hero: None selected"]
+
         return [
             f"Hero: {hero.name}",
             f"Class: {hero.hero_class}    Subclass: {hero.subclass or 'None'}",

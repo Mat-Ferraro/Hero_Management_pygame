@@ -10,7 +10,8 @@ class ScrollableListPanel:
         rect,
         title="",
         row_height=48,
-        row_spacing=52,
+        row_spacing=None,
+        row_gap=8,
         visible_rows=None,
         font=None,
         title_font=None,
@@ -22,7 +23,8 @@ class ScrollableListPanel:
         self.title_font = title_font or pygame.font.SysFont(None, 28)
 
         self.row_height = row_height
-        self.row_spacing = row_spacing
+        self.row_gap = row_gap
+        self.row_spacing = row_spacing if row_spacing is not None else row_height + row_gap
         self.visible_rows_override = visible_rows
         self.padding = padding
         self.title_height = title_height
@@ -39,11 +41,22 @@ class ScrollableListPanel:
         self.items = list(items or [])
         self.clamp_scroll()
 
+    def content_rect(self):
+        return pygame.Rect(
+            self.rect.x + self.padding,
+            self.rect.y + self.title_height,
+            self.rect.width - (self.padding * 2) - 24,
+            self.rect.height - self.title_height - self.padding,
+        )
+
     def visible_rows(self):
         if self.visible_rows_override is not None:
             return self.visible_rows_override
 
-        available_height = self.rect.height - self.title_height - self.padding
+        available_height = self.content_rect().height
+        if available_height <= 0:
+            return 1
+
         return max(1, available_height // self.row_spacing)
 
     def visible_items(self):
@@ -65,11 +78,15 @@ class ScrollableListPanel:
         self.panel.draw(screen, self.title_font)
 
         visible = self.visible_items()
+        content = self.content_rect()
+
+        previous_clip = screen.get_clip()
+        screen.set_clip(content)
 
         if not visible:
             screen.blit(
                 self.font.render(empty_text, True, (180, 180, 190)),
-                (self.rect.x + self.padding + 8, self.row_start_y() + 8),
+                (content.x + 8, content.y + 8),
             )
         else:
             y = self.row_start_y()
@@ -79,8 +96,9 @@ class ScrollableListPanel:
                 is_hovered = row_rect.collidepoint(self.mouse_pos)
 
                 row_drawer(screen, item, row_rect, is_selected, is_hovered)
-
                 y += self.row_spacing
+
+        screen.set_clip(previous_clip)
 
         draw_scrollbar(
             screen=screen,
@@ -92,13 +110,15 @@ class ScrollableListPanel:
         )
 
     def row_start_y(self):
-        return self.rect.y + self.title_height
+        return self.content_rect().y
 
     def row_rect(self, y):
+        content = self.content_rect()
+
         return pygame.Rect(
-            self.rect.x + self.padding,
-            y - 8,
-            self.rect.width - (self.padding * 2) - 24,
+            content.x,
+            y,
+            content.width,
             self.row_height,
         )
 

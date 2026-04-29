@@ -1,29 +1,28 @@
-from pygame_ui import theme
-from pygame_ui.widgets.key_value_grid import KeyValueGrid
+class DragDropController:
+    def __init__(self):
+        self.dragging_item = None
+        self.drag_origin = None
+        self.drag_pos = (0, 0)
 
+    def start_drag(self, item, origin, pos):
+        self.dragging_item = item
+        self.drag_origin = origin
+        self.drag_pos = pos
 
-class PartySummary:
-    def __init__(self, party):
-        self.party = list(party or [])
+    def update(self, pos):
+        self.drag_pos = pos
 
-    def total_power(self):
-        return sum(hero.combat_power() for hero in self.party)
+    def drop(self):
+        item = self.dragging_item
+        origin = self.drag_origin
+        pos = self.drag_pos
+        self.clear()
+        return item, origin, pos
 
-    def total_mentorship(self):
-        return sum(hero.mentorship_value() for hero in self.party)
+    def clear(self):
+        self.dragging_item = None
+        self.drag_origin = None
+        self.drag_pos = (0, 0)
 
-    def total_cost(self):
-        return sum(hero.wage_per_year for hero in self.party)
-
-    def draw(self, screen, font, x, y):
-        rows = [
-            ("Heroes", len(self.party)),
-            ("Power", self.total_power()),
-            ("Mentor", self.total_mentorship()),
-            ("Cost", f"{self.total_cost()}g"),
-        ]
-
-        screen.blit(font.render("Party Summary", True, theme.TEXT_PRIMARY), (x, y))
-        y += font.get_height() + 8
-
-        return KeyValueGrid(rows, columns=2, label_width=70, column_width=180).draw(screen, font, x, y)
+    def is_dragging(self):
+        return self.dragging_item is not None

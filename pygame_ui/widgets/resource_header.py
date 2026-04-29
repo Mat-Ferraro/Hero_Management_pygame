@@ -1,18 +1,25 @@
-from pygame_ui import theme
+from pygame_ui.widgets.value_row import ValueRow
 
 
-class ValueRow:
-    def __init__(self, label, value, label_color=theme.TEXT_MUTED, value_color=theme.TEXT_SECONDARY):
-        self.label = label
-        self.value = value
-        self.label_color = label_color
-        self.value_color = value_color
+class ResourceHeader:
+    def __init__(self, resources=None, spacing=170):
+        self.resources = list(resources or [])
+        self.spacing = spacing
 
-    def draw(self, screen, font, x, y, label_width=150):
-        label_surface = font.render(str(self.label), True, self.label_color)
-        value_surface = font.render(str(self.value), True, self.value_color)
+    def set_resources(self, resources):
+        self.resources = list(resources or [])
 
-        screen.blit(label_surface, (x, y))
-        screen.blit(value_surface, (x + label_width, y))
+    def draw(self, screen, font, x, y):
+        cursor_x = x
 
-        return y + max(label_surface.get_height(), value_surface.get_height()) + 4
+        for label, value in self.resources:
+            ValueRow(label, value).draw(
+                screen=screen,
+                font=font,
+                x=cursor_x,
+                y=y,
+                label_width=70,
+            )
+            cursor_x += self.spacing
+
+        return y + font.get_height() + 4
