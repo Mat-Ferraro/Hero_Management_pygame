@@ -2,5 +2,6 @@
     "python.analysis.extraPaths": [
         "./core",
         "./pygame_ui"
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

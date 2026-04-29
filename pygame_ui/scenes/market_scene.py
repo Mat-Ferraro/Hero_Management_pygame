@@ -5,7 +5,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
-from pygame_ui.widgets.navigation_buttons import action_button, footer_button, hub_button
+from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
 from pygame_ui.widgets.status_chip import StatusChip
@@ -30,35 +30,35 @@ class MarketScene(SceneBase):
         self.shop_items = self.generate_shop_items()
 
         self.details_panel = SelectionDetailsPanel(
-            rect=(20, 560, 1240, 145),
+            rect=(40, 790, 1840, 230),
             title="Market Details",
             empty_message="Select a shop item to inspect it.",
-            left_width=540,
-            right_width=560,
+            left_width=520,
+            right_width=1080,
         )
 
         self.shop_panel = ScrollableListPanel(
-            rect=(20, 120, 620, 420),
+            rect=(40, 150, 900, 600),
             title="Shop Inventory",
-            row_height=60,
-            row_gap=8,
+            row_height=68,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.inventory_panel = ScrollableListPanel(
-            rect=(660, 120, 600, 420),
+            rect=(980, 150, 900, 600),
             title="Guild Inventory",
-            row_height=56,
-            row_gap=8,
+            row_height=64,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
     def sync_lists(self):
@@ -111,9 +111,12 @@ class MarketScene(SceneBase):
 
     def draw_header(self, screen):
         HeaderPanel(
+            rect=(40, 30, 1840, 96),
             title="Market",
             stats="",
             status_message=self.status_message,
+            stats_pos=(70, 70),
+            status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
         ResourceHeader(
@@ -123,8 +126,8 @@ class MarketScene(SceneBase):
                 ("Inventory", len(self.state.inventory)),
                 ("Refresh", f"{self.REFRESH_COST}g"),
             ],
-            spacing=185,
-        ).draw(screen, self.font, 40, 58)
+            spacing=220,
+        ).draw(screen, self.font, 60, 72)
 
     def draw_shop_row(self, screen, item, row_rect, is_selected, is_hovered):
         draw_selectable_row(
@@ -140,21 +143,21 @@ class MarketScene(SceneBase):
 
         screen.blit(
             self.font.render(
-                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 125),
+                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 140),
                 True,
                 theme.TEXT_PRIMARY,
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 9),
         )
 
         StatusChip(
-            rect=(row_rect.right - 92, row_rect.y + 7, 78, 24),
+            rect=(row_rect.right - 106, row_rect.y + 9, 90, 26),
             text=f"{price}g",
             style="good" if can_afford else "danger",
         ).draw(screen, self.small_font)
 
         StatusChip(
-            rect=(row_rect.x + 12, row_rect.y + 34, 84, 22),
+            rect=(row_rect.x + 14, row_rect.y + 40, 92, 24),
             text=item.slot,
             style="info",
         ).draw(screen, self.small_font)
@@ -167,9 +170,9 @@ class MarketScene(SceneBase):
         ).draw(
             screen=screen,
             font=self.small_font,
-            x=row_rect.x + 106,
-            y=row_rect.y + 37,
-            max_width=row_rect.width - 214,
+            x=row_rect.x + 118,
+            y=row_rect.y + 43,
+            max_width=row_rect.width - 240,
         )
 
     def draw_inventory_row(self, screen, item, row_rect, is_selected, is_hovered):
@@ -183,22 +186,22 @@ class MarketScene(SceneBase):
 
         screen.blit(
             self.font.render(
-                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 24),
+                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 140),
                 True,
                 (210, 240, 210),
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 9),
         )
 
         StatusChip(
-            rect=(row_rect.x + 12, row_rect.y + 34, 84, 22),
+            rect=(row_rect.x + 14, row_rect.y + 40, 92, 24),
             text=item.slot,
             style="info",
         ).draw(screen, self.small_font)
 
         screen.blit(
             self.small_font.render(f"Value {item.value}g", True, (180, 210, 180)),
-            (row_rect.x + 110, row_rect.y + 37),
+            (row_rect.x + 118, row_rect.y + 44),
         )
 
     def draw_details(self, screen):
@@ -206,7 +209,7 @@ class MarketScene(SceneBase):
             self.details_panel.draw(
                 screen=screen,
                 title_font=self.title_font,
-                font=self.small_font,
+                font=self.font,
                 left_lines=[],
                 right_lines=[],
             )
@@ -228,12 +231,13 @@ class MarketScene(SceneBase):
             f"Bonuses: {self.item_bonus_summary(item)}",
             f"Classes: {', '.join(item.class_restrictions) if item.class_restrictions else 'Any'}",
             "Buying moves this item into guild inventory.",
+            "Market stock refreshes when you spend gold to reroll the shop.",
         ]
 
         self.details_panel.draw(
             screen=screen,
             title_font=self.title_font,
-            font=self.small_font,
+            font=self.font,
             left_lines=left_lines,
             right_lines=right_lines,
         )
@@ -241,11 +245,12 @@ class MarketScene(SceneBase):
     def build_buttons(self):
         buttons = [
             hub_button(self.on_return_to_hub),
-            footer_button("Refresh Shop", self.refresh_shop, index=1),
         ]
 
         if self.selected_shop_item is not None:
-            buttons.append(action_button("Buy Item", self.buy_selected_item))
+            buttons.append(
+                action_button("Buy Item", self.buy_selected_item, rect=(1660, 956, 180, 44))
+            )
 
         return buttons
 

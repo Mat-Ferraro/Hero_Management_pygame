@@ -15,6 +15,11 @@ from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
 from pygame_ui.scenes.training_scene import TrainingScene
 
 
+MIN_WINDOW_WIDTH = 1280
+MIN_WINDOW_HEIGHT = 720
+WINDOW_FLAGS = pygame.RESIZABLE
+
+
 class App:
     def __init__(self, screen):
         self.screen = screen
@@ -135,6 +140,15 @@ class App:
     def quit_game(self):
         self.running = False
 
+    def resize_window(self, width, height):
+        clamped_width = max(MIN_WINDOW_WIDTH, width)
+        clamped_height = max(MIN_WINDOW_HEIGHT, height)
+
+        self.screen = pygame.display.set_mode(
+            (clamped_width, clamped_height),
+            WINDOW_FLAGS,
+        )
+
     def run(self):
         while self.running:
             mouse_pos = pygame.mouse.get_pos()
@@ -142,6 +156,10 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    continue
+
+                if event.type == pygame.VIDEORESIZE:
+                    self.resize_window(event.w, event.h)
                     continue
 
                 handled_by_console = self.dev_console.handle_event(event)

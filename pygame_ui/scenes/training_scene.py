@@ -3,14 +3,17 @@ import pygame
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
-from pygame_ui.widgets.details_panel import DetailsPanel
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.navigation_buttons import action_button, hub_button
+from pygame_ui.widgets.resource_header import ResourceHeader
+from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
+from pygame_ui.widgets.stat_badge import StatBadge
+from pygame_ui.widgets.status_chip import StatusChip
+from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from pygame_ui.widgets.scrollable_text_panel import ScrollableTextPanel
 from systems.training_system import can_train_hero, train_hero, training_cost, training_xp
-
-from ..widgets.button import Button
 
 
 class TrainingScene(SceneBase):
@@ -23,31 +26,44 @@ class TrainingScene(SceneBase):
 
         self.status_message = "Select a hero to train."
         self.selected_hero = None
-        self.stat_font = pygame.font.SysFont(None, 26)
+        self.stat_font = pygame.font.SysFont(None, 30)
 
-        self.details_panel = DetailsPanel((760, 120, 500, 260), "Training Details")
-        self.footer_panel = DetailsPanel((20, 570, 1240, 135), "Career Notes")
+        self.details_panel = SelectionDetailsPanel(
+            rect=(1220, 150, 660, 300),
+            title="Training Details",
+            empty_message="Select a hero to inspect training results.",
+            left_width=260,
+            right_width=240,
+        )
+
+        self.footer_panel = SelectionDetailsPanel(
+            rect=(40, 790, 1840, 230),
+            title="Career Notes",
+            empty_message="",
+            left_width=860,
+            right_width=860,
+        )
 
         self.heroes_panel = ScrollableListPanel(
-            rect=(20, 120, 720, 430),
+            rect=(40, 150, 1140, 600),
             title="Roster",
-            row_height=50,
-            row_spacing=58,
-            visible_rows=6,
+            row_height=72,
+            row_gap=10,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.log_panel = ScrollableTextPanel(
-            rect=(760, 400, 500, 150),
+            rect=(1220, 480, 660, 270),
             title="Training Log",
             font=self.small_font,
             title_font=self.title_font,
-            row_spacing=22,
+            row_spacing=24,
             padding=24,
-            title_height=50,
+            title_height=54,
         )
         self.log_panel.set_lines(["Training Hall opened."])
 
@@ -91,7 +107,6 @@ class TrainingScene(SceneBase):
         self.draw_details(screen)
         self.log_panel.draw(screen)
         self.draw_footer(screen)
-
         self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
@@ -99,42 +114,84 @@ class TrainingScene(SceneBase):
         cost = training_cost(level)
         xp = training_xp(level)
 
-        stats = (
-            f"Gold: {self.state.gold}g    "
-            f"Training Hall Lv {level}    "
-            f"Base Training Cost: {cost}g    "
-            f"Training XP: {xp}"
-        )
-
         HeaderPanel(
+            rect=(40, 30, 1840, 96),
             title="Training Hall",
-            stats=stats,
+            stats="",
             status_message=self.status_message,
+            stats_pos=(70, 70),
+            status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
-    def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
-        draw_selectable_row(screen, row_rect, is_selected, is_hovered, style="green")
+        ResourceHeader(
+            resources=[
+                ("Gold", f"{self.state.gold}g"),
+                ("Hall", f"Lv {level}"),
+                ("Cost", f"{cost}g"),
+                ("XP", xp),
+                ("Roster", len(self.state.roster)),
+            ],
+            spacing=190,
+        ).draw(screen, self.font, 60, 72)
 
+    def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
         allowed, reason = can_train_hero(hero)
-        status = "Trainable" if allowed else reason
+
+        draw_selectable_row(
+            screen=screen,
+            rect=row_rect,
+            is_selected=is_selected,
+            is_hovered=is_hovered,
+            style="green" if allowed else "brown",
+        )
 
         subclass = hero.subclass or "Base"
-        line_1 = (
-            f"{hero.name} | {hero.hero_class}/{subclass} | "
-            f"Lv {hero.level} | Age {hero.age} ({hero.career_stage()})"
-        )
-        line_2 = (
-            f"XP {hero.xp}/{hero.xp_to_next_level()} | "
-            f"Pwr {hero.combat_power()} | Mentor {hero.mentorship_value()} | {status}"
-        )
 
         screen.blit(
-            self.font.render(truncate_text(line_1, self.font, row_rect.width - 24), True, (210, 240, 210)),
-            (row_rect.x + 12, row_rect.y + 8),
+            self.font.render(
+                truncate_text(
+                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
+                    self.font,
+                    row_rect.width - 250,
+                ),
+                True,
+                (210, 240, 210) if allowed else theme.TEXT_MUTED,
+            ),
+            (row_rect.x + 14, row_rect.y + 10),
         )
-        screen.blit(
-            self.small_font.render(truncate_text(line_2, self.small_font, row_rect.width - 24), True, (180, 210, 180)),
-            (row_rect.x + 12, row_rect.y + 32),
+
+        StatusChip(
+            rect=(row_rect.right - 230, row_rect.y + 10, 104, 26),
+            text="Trainable" if allowed else "Blocked",
+            style="good" if allowed else "danger",
+        ).draw(screen, self.small_font)
+
+        StatusChip(
+            rect=(row_rect.right - 116, row_rect.y + 10, 102, 26),
+            text=f"XP {hero.xp}",
+            style="info",
+        ).draw(screen, self.small_font)
+
+        detail = (
+            f"Age {hero.age} ({hero.career_stage()}) | "
+            f"Pwr {hero.combat_power()} | Mentor {hero.mentorship_value()} | "
+            f"Next Lv {hero.xp_to_next_level()}"
+        )
+
+        if not allowed:
+            detail += f" | {reason}"
+
+        TextBlock(
+            lines=[detail],
+            color=(180, 210, 180) if allowed else theme.TEXT_MUTED,
+            row_spacing=20,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 14,
+            y=row_rect.y + 46,
+            max_width=row_rect.width - 28,
         )
 
     def draw_details(self, screen):
@@ -142,64 +199,111 @@ class TrainingScene(SceneBase):
         cost = training_cost(level)
         xp = training_xp(level)
 
-        self.details_panel.panel.draw(screen, self.title_font)
-        self.draw_training_price_badge(screen, self.details_panel.rect, cost, xp)
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
-        text_x = self.details_panel.rect.x + 30
-        y = self.details_panel.rect.y + 60
-        text_width = self.details_panel.rect.width - 200
+        StatBadge(
+            rect=(self.details_panel.rect.right - 170, self.details_panel.rect.y + 56, 140, 78),
+            label="Cost",
+            value=f"{cost}g",
+            subtext=f"+{xp} XP",
+        ).draw(screen, self.small_font, self.stat_font, self.small_font)
 
         if self.selected_hero is None:
-            lines = ["Select a hero to inspect training results."]
-        else:
-            hero = self.selected_hero
-            allowed, reason = can_train_hero(hero)
+            TextBlock(
+                lines=["Select a hero to inspect training results."],
+                color=theme.TEXT_SECONDARY,
+                row_spacing=24,
+            ).draw(
+                screen=screen,
+                font=self.font,
+                x=self.details_panel.rect.x + 30,
+                y=self.details_panel.rect.y + 70,
+                max_width=self.details_panel.rect.width - 230,
+            )
+            return
 
-            lines = [
-                f"Hero: {hero.name}",
-                f"Class: {hero.hero_class}    Subclass: {hero.subclass or 'None'}",
-                f"Ability: {hero.special_ability or 'None'}",
-                f"Level: {hero.level}    XP: {hero.xp}/{hero.xp_to_next_level()}",
-                f"Status: {'Ready' if allowed else reason}",
-            ]
+        hero = self.selected_hero
+        allowed, reason = can_train_hero(hero)
 
-        from pygame_ui.ui_helpers import wrap_text
-
-        for line in lines:
-            for wrapped in wrap_text(line, self.small_font, text_width):
-                screen.blit(self.small_font.render(wrapped, True, theme.TEXT_SECONDARY), (text_x, y))
-                y += 20
-
-    def draw_training_price_badge(self, screen, panel_rect, cost, xp):
-        badge_rect = pygame.Rect(panel_rect.right - 160, panel_rect.y + 50, 130, 70)
-
-        pygame.draw.rect(screen, (48, 48, 62), badge_rect, border_radius=8)
-        pygame.draw.rect(screen, (150, 150, 190), badge_rect, 2, border_radius=8)
-
-        screen.blit(self.small_font.render("Cost", True, theme.TEXT_MUTED), (badge_rect.x + 14, badge_rect.y + 8))
-        screen.blit(self.stat_font.render(f"{cost}g", True, (245, 235, 210)), (badge_rect.x + 14, badge_rect.y + 26))
-        screen.blit(self.small_font.render(f"+{xp} XP", True, (190, 220, 190)), (badge_rect.x + 14, badge_rect.y + 48))
-
-    def draw_footer(self, screen):
-        lines = [
-            "Training is safe but costs gold. Expeditions remain the fastest way to grow heroes.",
-            "Future Training Hall upgrades will unlock subclass choices and special abilities.",
-            "Older heroes may lose raw power, but their mentorship and learned abilities can remain valuable.",
+        left_lines = [
+            f"Hero: {hero.name}",
+            f"Class: {hero.hero_class}",
+            f"Subclass: {hero.subclass or 'None'}",
+            f"Ability: {hero.special_ability or 'None'}",
+            f"Status: {'Ready' if allowed else reason}",
         ]
 
-        self.footer_panel.draw_lines(
+        right_lines = [
+            f"Level: {hero.level}",
+            f"XP: {hero.xp}/{hero.xp_to_next_level()}",
+            f"Power: {hero.combat_power()}",
+            f"Mentor: {hero.mentorship_value()}",
+            f"Age: {hero.age}",
+        ]
+
+        start_x = self.details_panel.rect.x + 30
+        start_y = self.details_panel.rect.y + 72
+        column_width = 280
+
+        for line in left_lines:
+            screen.blit(
+                self.font.render(line, True, theme.TEXT_SECONDARY),
+                (start_x, start_y),
+            )
+            start_y += 28
+
+        right_x = self.details_panel.rect.x + column_width
+        right_y = self.details_panel.rect.y + 72
+
+        for line in right_lines:
+            screen.blit(
+                self.font.render(line, True, theme.TEXT_SECONDARY),
+                (right_x, right_y),
+            )
+            right_y += 28
+
+    def draw_footer(self, screen):
+        self.footer_panel.details_panel.panel.draw(screen, self.title_font)
+
+        left_lines = [
+            "Training is safe but costs gold.",
+            "Expeditions remain the fastest way to grow heroes.",
+            "Training is ideal for topping off heroes close to leveling.",
+        ]
+
+        right_lines = [
+            "Future Training Hall upgrades will unlock subclass choices.",
+            "Older heroes may lose raw power over time.",
+            "Mentorship and learned abilities can remain valuable late into a career.",
+        ]
+
+        y = self.footer_panel.rect.y + 54
+
+        TextBlock(left_lines, color=theme.TEXT_SECONDARY, row_spacing=28).draw(
             screen=screen,
-            title_font=self.title_font,
-            font=self.small_font,
-            lines=lines,
-            max_width=1120,
+            font=self.font,
+            x=self.footer_panel.rect.x + 28,
+            y=y,
+            max_width=820,
+        )
+
+        TextBlock(right_lines, color=theme.TEXT_SECONDARY, row_spacing=28).draw(
+            screen=screen,
+            font=self.font,
+            x=self.footer_panel.rect.x + 960,
+            y=y,
+            max_width=820,
         )
 
     def build_buttons(self):
-        buttons = [Button(theme.HUB_BUTTON_RECT, "Hub", self.on_return_to_hub)]
+        buttons = [
+            hub_button(self.on_return_to_hub),
+        ]
 
-        if self.selected_hero is not None:
-            buttons.append(Button((1010, 318, 190, 42), "Train Hero", self.train_selected_hero))
+        if self.selected_hero:
+            allowed, _ = can_train_hero(self.selected_hero)
+            label = "Train Hero" if allowed else "Cannot Train"
+            buttons.append(action_button(label, self.train_selected_hero, rect=(1660, 700, 180, 44)))
 
         return buttons
 

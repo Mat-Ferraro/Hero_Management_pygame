@@ -2,9 +2,6 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
-from pygame_ui.widgets.item_summary import ItemSummaryBlock
-from pygame_ui.widgets.key_value_grid import KeyValueGrid
-from pygame_ui.widgets.meter_row import MeterRow
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
@@ -29,47 +26,47 @@ class InventoryScene(SceneBase):
         self.selected_equipment_slot = None
 
         self.details_panel = SelectionDetailsPanel(
-            rect=(20, 520, 1240, 185),
+            rect=(40, 790, 1840, 230),
             title="Selection Details",
             empty_message="Select an item or hero to inspect.",
-            left_width=540,
-            right_width=560,
+            left_width=520,
+            right_width=1120,
         )
 
         self.items_panel = ScrollableListPanel(
-            rect=(20, 120, 520, 380),
+            rect=(40, 150, 680, 600),
             title="Items",
-            row_height=60,
-            row_gap=8,
+            row_height=70,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.heroes_panel = ScrollableListPanel(
-            rect=(560, 120, 700, 270),
+            rect=(760, 150, 1120, 390),
             title="Heroes",
-            row_height=60,
-            row_gap=8,
+            row_height=70,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=24,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.equipment_panel = ScrollableListPanel(
-            rect=(560, 410, 700, 90),
+            rect=(760, 570, 1120, 180),
             title="Selected Hero Equipment",
-            row_height=32,
-            row_gap=6,
+            row_height=40,
+            row_gap=8,
             visible_rows=None,
             font=self.small_font,
             title_font=self.title_font,
-            padding=24,
-            title_height=38,
+            padding=18,
+            title_height=52,
         )
 
     def sync_lists(self):
@@ -98,7 +95,6 @@ class InventoryScene(SceneBase):
     def update(self, mouse_pos):
         super().update(mouse_pos)
         self.sync_lists()
-
         self.items_panel.update(mouse_pos)
         self.heroes_panel.update(mouse_pos)
         self.equipment_panel.update(mouse_pos)
@@ -135,9 +131,12 @@ class InventoryScene(SceneBase):
 
     def draw_header(self, screen):
         HeaderPanel(
+            rect=(40, 30, 1840, 96),
             title="Inventory",
             stats="",
             status_message=self.status_message,
+            stats_pos=(70, 70),
+            status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
         ResourceHeader(
@@ -147,8 +146,8 @@ class InventoryScene(SceneBase):
                 ("Items", len(self.state.inventory)),
                 ("Equipped", self.total_equipped_items()),
             ],
-            spacing=185,
-        ).draw(screen, self.font, 40, 58)
+            spacing=210,
+        ).draw(screen, self.font, 60, 72)
 
     def draw_item_row(self, screen, item, row_rect, is_selected, is_hovered):
         draw_selectable_row(
@@ -161,21 +160,21 @@ class InventoryScene(SceneBase):
 
         screen.blit(
             self.font.render(
-                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 110),
+                truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 130),
                 True,
                 theme.TEXT_PRIMARY,
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 10),
         )
 
         StatusChip(
-            rect=(row_rect.right - 92, row_rect.y + 7, 78, 24),
+            rect=(row_rect.right - 106, row_rect.y + 10, 90, 26),
             text=f"{item.value}g",
             style="warning" if item.value >= 250 else "good",
         ).draw(screen, self.small_font)
 
         StatusChip(
-            rect=(row_rect.x + 12, row_rect.y + 34, 84, 22),
+            rect=(row_rect.x + 14, row_rect.y + 42, 92, 24),
             text=item.slot,
             style="info",
         ).draw(screen, self.small_font)
@@ -188,14 +187,13 @@ class InventoryScene(SceneBase):
         ).draw(
             screen=screen,
             font=self.small_font,
-            x=row_rect.x + 106,
-            y=row_rect.y + 37,
-            max_width=row_rect.width - 124,
+            x=row_rect.x + 118,
+            y=row_rect.y + 45,
+            max_width=row_rect.width - 140,
         )
 
     def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
         can_equip_selected_item = True
-
         if self.selected_item is not None:
             can_equip_selected_item = self.selected_item.can_equip(hero.hero_class)
 
@@ -209,7 +207,7 @@ class InventoryScene(SceneBase):
             style=row_style,
         )
 
-        subclass = hero.subclass or "Base"
+        subclass = hero.subclass or "No Subclass"
         health_style = self.health_chip_style(hero)
 
         name_color = (210, 240, 210) if can_equip_selected_item else theme.TEXT_MUTED
@@ -220,40 +218,42 @@ class InventoryScene(SceneBase):
                 truncate_text(
                     f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
                     self.font,
-                    row_rect.width - 220,
+                    row_rect.width - 250,
                 ),
                 True,
                 name_color,
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 10),
         )
 
         eligibility_text = "Eligible" if can_equip_selected_item else "Cannot Equip"
         eligibility_style = "good" if can_equip_selected_item else "danger"
 
         StatusChip(
-            rect=(row_rect.right - 205, row_rect.y + 7, 92, 24),
+            rect=(row_rect.right - 220, row_rect.y + 10, 102, 26),
             text=eligibility_text if self.selected_item is not None else hero.health_status(),
             style=eligibility_style if self.selected_item is not None else health_style,
         ).draw(screen, self.small_font)
 
         StatusChip(
-            rect=(row_rect.right - 104, row_rect.y + 7, 90, 24),
+            rect=(row_rect.right - 108, row_rect.y + 10, 92, 26),
             text=f"Pwr {hero.combat_power()}",
             style="info",
         ).draw(screen, self.small_font)
 
-        screen.blit(
-            self.small_font.render(
-                truncate_text(
-                    f"Age {hero.age} ({hero.career_stage()}) | Mentor {hero.mentorship_value()} | Equipped {len(hero.equipment)}",
-                    self.small_font,
-                    row_rect.width - 24,
-                ),
-                True,
-                detail_color,
-            ),
-            (row_rect.x + 12, row_rect.y + 37),
+        TextBlock(
+            lines=[
+                f"Age {hero.age} ({hero.career_stage()}) | Ability: {hero.special_ability or 'None'} | Mentor {hero.mentorship_value()} | Equipped {len(hero.equipment)}"
+            ],
+            color=detail_color,
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 14,
+            y=row_rect.y + 45,
+            max_width=row_rect.width - 28,
         )
 
     def draw_equipment_row(self, screen, row, row_rect, is_selected, is_hovered):
@@ -268,23 +268,22 @@ class InventoryScene(SceneBase):
         )
 
         StatusChip(
-            rect=(row_rect.x + 8, row_rect.y + 5, 84, 22),
+            rect=(row_rect.x + 10, row_rect.y + 8, 92, 24),
             text=slot,
             style="info",
         ).draw(screen, self.small_font)
 
         screen.blit(
             self.small_font.render(
-                truncate_text(f"{item.name} [{item.rarity}]", self.small_font, row_rect.width - 116),
+                truncate_text(f"{item.name} [{item.rarity}]", self.small_font, row_rect.width - 124),
                 True,
                 (230, 220, 200),
             ),
-            (row_rect.x + 104, row_rect.y + 8),
+            (row_rect.x + 116, row_rect.y + 12),
         )
 
     def draw_details(self, screen):
         detail_item = self.selected_item
-
         if detail_item is None and self.selected_hero and self.selected_equipment_slot:
             detail_item = self.selected_hero.equipment.get(self.selected_equipment_slot)
 
@@ -292,7 +291,7 @@ class InventoryScene(SceneBase):
             self.details_panel.draw(
                 screen=screen,
                 title_font=self.title_font,
-                font=self.small_font,
+                font=self.font,
                 left_lines=[],
                 right_lines=[],
             )
@@ -304,7 +303,7 @@ class InventoryScene(SceneBase):
         self.details_panel.draw(
             screen=screen,
             title_font=self.title_font,
-            font=self.small_font,
+            font=self.font,
             left_lines=left_lines,
             right_lines=right_lines,
         )
@@ -315,9 +314,9 @@ class InventoryScene(SceneBase):
         ]
 
         if self.selected_item and self.selected_hero:
-            buttons.append(action_button("Equip Item", self.equip_selected_item))
+            buttons.append(action_button("Equip Item", self.equip_selected_item, rect=(1660, 956, 180, 44)))
         elif self.selected_hero and self.selected_equipment_slot:
-            buttons.append(action_button("Unequip Item", self.unequip_selected_item))
+            buttons.append(action_button("Unequip Item", self.unequip_selected_item, rect=(1660, 956, 180, 44)))
 
         return buttons
 
@@ -410,7 +409,6 @@ class InventoryScene(SceneBase):
     def selected_hero_equipment_rows(self):
         if self.selected_hero is None:
             return []
-
         return list(self.selected_hero.equipment.items())
 
     def selected_equipment_row(self):
@@ -420,13 +418,11 @@ class InventoryScene(SceneBase):
         for row in self.selected_hero_equipment_rows():
             if row[0] == self.selected_equipment_slot:
                 return row
-
         return None
 
     def equipment_empty_text(self):
         if self.selected_hero is None:
             return "Select a hero to view equipped items."
-
         return f"{self.selected_hero.name} has no equipped items."
 
     def total_equipped_items(self):
@@ -435,19 +431,13 @@ class InventoryScene(SceneBase):
     def equipment_summary(self, hero):
         if not hero.equipment:
             return "None"
-
         return ", ".join(f"{slot}: {item.name}" for slot, item in hero.equipment.items())
 
     def health_chip_style(self, hero):
         if hero.health_status() in ("DEAD", "CRITICAL"):
             return "danger"
-
-        if hero.health_status() in ("WOUNDED", "HURT"):
+        if hero.health_status() in ("WOUNDED", "HURT") or hero.injured_years_remaining > 0:
             return "warning"
-
-        if hero.injured_years_remaining > 0:
-            return "warning"
-
         return "good"
 
     def item_bonus_summary(self, item):
@@ -496,5 +486,5 @@ class InventoryScene(SceneBase):
             f"Age: {hero.age}    Stage: {hero.career_stage()}    Age Power: x{hero.age_power_multiplier():.2f}",
             f"Level: {hero.level}    Power: {hero.combat_power()}    Mentor: {hero.mentorship_value()}",
             f"Stats: Might {hero.total_stat('might')}    Agility {hero.total_stat('agility')}    Mind {hero.total_stat('mind')}    Spirit {hero.total_stat('spirit')}",
-            truncate_text(f"Equipment: {self.equipment_summary(hero)}", self.small_font, 560),
+            truncate_text(f"Equipment: {self.equipment_summary(hero)}", self.font, 1000),
         ]

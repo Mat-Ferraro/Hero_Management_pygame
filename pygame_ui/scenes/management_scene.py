@@ -24,35 +24,35 @@ class ManagementScene(SceneBase):
         self.status_message = "Guild management active."
 
         self.details_panel = SelectionDetailsPanel(
-            rect=(20, 500, 1240, 190),
+            rect=(40, 790, 1840, 230),
             title="Selected Hero Details",
             empty_message="Select a recruit or roster hero to inspect.",
-            left_width=540,
-            right_width=560,
+            left_width=560,
+            right_width=1160,
         )
 
         self.recruits_panel = ScrollableListPanel(
-            rect=(20, 120, 740, 360),
+            rect=(40, 150, 1080, 600),
             title="Available Recruits",
-            row_height=66,
-            row_gap=8,
+            row_height=74,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.roster_panel = ScrollableListPanel(
-            rect=(780, 120, 480, 360),
+            rect=(1160, 150, 720, 600),
             title="Roster",
-            row_height=62,
-            row_gap=8,
+            row_height=70,
+            row_gap=10,
             visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
     def roster_capacity(self):
@@ -108,9 +108,12 @@ class ManagementScene(SceneBase):
 
     def draw_header(self, screen):
         HeaderPanel(
+            rect=(40, 30, 1840, 96),
             title="Guild Management",
             stats="",
             status_message=self.status_message,
+            stats_pos=(70, 70),
+            status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
         ResourceHeader(
@@ -119,9 +122,10 @@ class ManagementScene(SceneBase):
                 ("Roster", f"{len(self.state.roster)}/{self.roster_capacity()}"),
                 ("Recruits", len(self.state.available_contracts)),
                 ("Fallen", len(self.state.fallen_heroes)),
+                ("Inventory", len(self.state.inventory)),
             ],
             spacing=185,
-        ).draw(screen, self.font, 40, 58)
+        ).draw(screen, self.font, 60, 72)
 
     def draw_recruit_row(self, screen, hero, row_rect, is_selected, is_hovered):
         can_afford = self.state.gold >= hero.signing_bonus
@@ -143,22 +147,22 @@ class ManagementScene(SceneBase):
                 truncate_text(
                     f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
                     self.font,
-                    row_rect.width - 245,
+                    row_rect.width - 250,
                 ),
                 True,
                 theme.TEXT_PRIMARY,
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 10),
         )
 
         StatusChip(
-            rect=(row_rect.right - 232, row_rect.y + 7, 104, 24),
+            rect=(row_rect.right - 234, row_rect.y + 10, 104, 26),
             text=f"{hero.signing_bonus}g",
             style="good" if can_afford else "danger",
         ).draw(screen, self.small_font)
 
         StatusChip(
-            rect=(row_rect.right - 118, row_rect.y + 7, 104, 24),
+            rect=(row_rect.right - 118, row_rect.y + 10, 104, 26),
             text="Open" if not roster_full else "Full",
             style="good" if not roster_full else "danger",
         ).draw(screen, self.small_font)
@@ -177,9 +181,9 @@ class ManagementScene(SceneBase):
         ).draw(
             screen=screen,
             font=self.small_font,
-            x=row_rect.x + 12,
-            y=row_rect.y + 38,
-            max_width=row_rect.width - 24,
+            x=row_rect.x + 14,
+            y=row_rect.y + 44,
+            max_width=row_rect.width - 28,
         )
 
     def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
@@ -202,16 +206,16 @@ class ManagementScene(SceneBase):
                 truncate_text(
                     f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
                     self.font,
-                    row_rect.width - 132,
+                    row_rect.width - 140,
                 ),
                 True,
                 (210, 240, 210),
             ),
-            (row_rect.x + 12, row_rect.y + 7),
+            (row_rect.x + 14, row_rect.y + 10),
         )
 
         StatusChip(
-            rect=(row_rect.right - 118, row_rect.y + 7, 104, 24),
+            rect=(row_rect.right - 118, row_rect.y + 10, 104, 26),
             text=self.satisfaction_label(hero),
             style=self.satisfaction_style(hero),
         ).draw(screen, self.small_font)
@@ -230,9 +234,9 @@ class ManagementScene(SceneBase):
         ).draw(
             screen=screen,
             font=self.small_font,
-            x=row_rect.x + 12,
-            y=row_rect.y + 36,
-            max_width=row_rect.width - 24,
+            x=row_rect.x + 14,
+            y=row_rect.y + 44,
+            max_width=row_rect.width - 28,
         )
 
     def draw_details(self, screen):
@@ -248,6 +252,8 @@ class ManagementScene(SceneBase):
 
         hero = self.selected_hero
 
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
+
         columns = [
             [
                 f"Name: {hero.name}",
@@ -255,29 +261,29 @@ class ManagementScene(SceneBase):
                 f"Class: {hero.hero_class}",
                 f"Subclass: {hero.subclass or 'None'}",
                 f"Specialty: {hero.specialty}",
+                f"Ability: {hero.special_ability or 'None'}",
             ],
             [
-                f"Ability: {hero.special_ability or 'None'}",
                 f"Growth: {hero.growth_rate}",
                 f"Attitude: {hero.contract_attitude}",
                 f"Satisfaction: {hero.satisfaction}/100",
                 f"Contract Years: {hero.contract_years}",
-            ],
-            [
                 f"Recruit Cost: {hero.signing_bonus}g",
                 f"Dispatch Wage: {hero.wage_per_year}g",
+            ],
+            [
                 f"Power: {hero.combat_power()}",
+                f"Age: {hero.age} ({hero.career_stage()})",
                 f"Age Power: x{hero.age_power_multiplier():.2f}",
                 f"Mentorship: {hero.mentorship_value()}",
                 f"Retire Risk: {hero.retirement_chance() * 100:.1f}%",
+                f"Health: {self.health_text(hero)}",
             ],
         ]
 
-        self.details_panel.details_panel.panel.draw(screen, self.title_font)
-
-        start_x = self.details_panel.rect.x + 24
-        start_y = self.details_panel.rect.y + 46
-        column_width = 390
+        start_x = self.details_panel.rect.x + 28
+        start_y = self.details_panel.rect.y + 54
+        column_width = 590
 
         for column_index, lines in enumerate(columns):
             x = start_x + column_index * column_width
@@ -285,10 +291,10 @@ class ManagementScene(SceneBase):
 
             for line in lines:
                 screen.blit(
-                    self.small_font.render(line, True, theme.TEXT_SECONDARY),
+                    self.font.render(line, True, theme.TEXT_SECONDARY),
                     (x, y),
                 )
-                y += 20
+                y += 28
 
     def build_all_buttons(self):
         buttons = [
@@ -296,10 +302,10 @@ class ManagementScene(SceneBase):
         ]
 
         if self.selected_hero and self.selected_source == "Recruit":
-            buttons.append(action_button("Recruit Hero", self.hire_selected_hero))
+            buttons.append(action_button("Recruit Hero", self.hire_selected_hero, rect=(1440, 956, 180, 44)))
 
         if self.selected_hero and self.selected_source == "Roster":
-            buttons.append(action_button("Release Hero", self.release_selected_hero))
+            buttons.append(action_button("Release Hero", self.release_selected_hero, rect=(1660, 956, 180, 44)))
 
         return buttons
 
@@ -387,10 +393,3 @@ class ManagementScene(SceneBase):
         if hero.injured_years_remaining > 0:
             return f"Injured {hero.injured_years_remaining}y"
         return hero.health_status()
-
-    def health_style(self, hero):
-        if hero.health_status() in ("DEAD", "CRITICAL"):
-            return "danger"
-        if hero.health_status() in ("WOUNDED", "HURT") or hero.injured_years_remaining > 0:
-            return "warning"
-        return "good"

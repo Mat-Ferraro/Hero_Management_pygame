@@ -2,12 +2,16 @@ from game_state import available_dungeons_for_state
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
-from pygame_ui.widgets.details_panel import DetailsPanel
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.navigation_buttons import action_button, hub_button
+from pygame_ui.widgets.party_summary import PartySummary
+from pygame_ui.widgets.resource_header import ResourceHeader
+from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
+from pygame_ui.widgets.status_chip import StatusChip
+from pygame_ui.widgets.text_block import TextBlock
+from pygame_ui.widgets.timeline_strip import TimelineStrip
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
-
-from ..widgets.button import Button
 
 
 class ExpeditionScene(SceneBase):
@@ -21,44 +25,51 @@ class ExpeditionScene(SceneBase):
         self.status_message = "Choose a mission, then assign heroes."
 
         self.selected_party = []
+        self.selected_party_hero = None
         self.selected_dungeon = None
 
-        self.details_panel = DetailsPanel((20, 548, 1240, 160), "Expedition Details")
+        self.details_panel = SelectionDetailsPanel(
+            rect=(40, 760, 1840, 260),
+            title="Expedition Details",
+            empty_message="Choose a mission and assign heroes.",
+            left_width=520,
+            right_width=520,
+        )
 
         self.roster_panel = ScrollableListPanel(
-            rect=(20, 120, 520, 410),
+            rect=(40, 150, 760, 570),
             title="Available Heroes",
-            row_height=40,
-            row_spacing=48,
-            visible_rows=6,
+            row_height=76,
+            row_gap=10,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=14,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.party_panel = ScrollableListPanel(
-            rect=(560, 120, 320, 410),
+            rect=(830, 150, 410, 570),
             title="Party",
-            row_height=40,
-            row_spacing=48,
-            visible_rows=4,
+            row_height=64,
+            row_gap=10,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=26,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
         self.dungeon_panel = ScrollableListPanel(
-            rect=(900, 120, 360, 410),
+            rect=(1270, 150, 610, 570),
             title="Missions",
-            row_height=78,
-            row_spacing=84,
-            visible_rows=4,
+            row_height=110,
+            row_gap=12,
+            visible_rows=None,
             font=self.font,
             title_font=self.title_font,
-            padding=30,
-            title_height=60,
+            padding=18,
+            title_height=64,
         )
 
     def sync_lists(self):
@@ -66,13 +77,16 @@ class ExpeditionScene(SceneBase):
         self.party_panel.set_items(self.selected_party)
         self.dungeon_panel.set_items(self.available_dungeons())
 
+        if self.selected_party_hero not in self.selected_party:
+            self.selected_party_hero = None
+
+    def available_dungeons(self):
+        return available_dungeons_for_state(self.state)
+
     def party_limit(self):
         if self.selected_dungeon is None:
             return 0
         return self.party_limit_for_dungeon(self.selected_dungeon)
-
-    def available_dungeons(self):
-        return available_dungeons_for_state(self.state)
 
     def handle_event(self, event):
         self.sync_lists()
@@ -115,7 +129,7 @@ class ExpeditionScene(SceneBase):
         self.party_panel.draw(
             screen=screen,
             row_drawer=self.draw_party_row,
-            selected_item=None,
+            selected_item=self.selected_party_hero,
             empty_text="No party selected.",
         )
 
@@ -130,98 +144,305 @@ class ExpeditionScene(SceneBase):
         self.update_and_draw_buttons(screen, self.build_all_buttons())
 
     def draw_header(self, screen):
-        party_cap_text = self.party_limit() if self.selected_dungeon else "?"
-
-        stats = (
-            f"Gold: {self.state.gold}g    "
-            f"Campaign Year: {self.state.year}    "
-            f"Campaigns: {self.state.expedition - 1}    "
-            f"Party: {len(self.selected_party)}/{party_cap_text}"
-        )
-
         HeaderPanel(
+            rect=(40, 30, 1840, 96),
             title="Expedition Prep",
-            stats=stats,
+            stats="",
             status_message=self.status_message,
+            stats_pos=(70, 70),
+            status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
-    def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
-        draw_selectable_row(screen, row_rect, False, is_hovered, style="dark")
+        party_cap_text = self.party_limit() if self.selected_dungeon else "?"
+        ResourceHeader(
+            resources=[
+                ("Gold", f"{self.state.gold}g"),
+                ("Year", self.state.year),
+                ("Runs", self.state.expedition - 1),
+                ("Party", f"{len(self.selected_party)}/{party_cap_text}"),
+            ],
+            spacing=210,
+        ).draw(screen, self.font, 60, 72)
 
-        subclass = hero.subclass or "Base"
-        line = (
-            f"{hero.name} | {hero.hero_class}/{subclass} | "
-            f"Lv {hero.level} | {hero.career_stage()} | Pwr {hero.combat_power()}"
+    def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
+        ready = hero.injured_years_remaining <= 0
+        style = "green" if ready else "brown"
+
+        draw_selectable_row(
+            screen=screen,
+            rect=row_rect,
+            is_selected=False,
+            is_hovered=is_hovered,
+            style=style,
         )
 
-        rendered_line = truncate_text(line, self.font, row_rect.width - 100)
-        screen.blit(self.font.render(rendered_line, True, theme.TEXT_PRIMARY), (row_rect.x + 12, row_rect.y + 11))
+        subclass = hero.subclass or "Base"
+
+        button_reserved_width = 46
+
+        screen.blit(
+            self.font.render(
+                truncate_text(
+                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
+                    self.font,
+                    row_rect.width - button_reserved_width - 30,
+                ),
+                True,
+                (210, 240, 210) if ready else theme.TEXT_MUTED,
+            ),
+            (row_rect.x + 14, row_rect.y + 8),
+        )
+
+        if self.selected_dungeon is None:
+            chip_text = "Pick Mission"
+            chip_style = "locked"
+        elif not ready:
+            chip_text = "Injured"
+            chip_style = "warning"
+        elif len(self.selected_party) >= self.party_limit():
+            chip_text = "Party Full"
+            chip_style = "danger"
+        else:
+            chip_text = "Ready"
+            chip_style = "good"
+
+        StatusChip(
+            rect=(row_rect.x + 14, row_rect.y + 42, 110, 24),
+            text=chip_text,
+            style=chip_style,
+        ).draw(screen, self.small_font)
+
+        TextBlock(
+            lines=[
+                f"Pwr {hero.combat_power()} | Age {hero.age} ({hero.career_stage()}) | Wage {hero.wage_per_year}g | Mentor {hero.mentorship_value()}"
+            ],
+            color=(180, 210, 180) if ready else theme.TEXT_MUTED,
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 136,
+            y=row_rect.y + 45,
+            max_width=row_rect.width - 190,
+        )
 
     def draw_party_row(self, screen, hero, row_rect, is_selected, is_hovered):
-        draw_selectable_row(screen, row_rect, False, is_hovered, style="green")
+        draw_selectable_row(
+            screen=screen,
+            rect=row_rect,
+            is_selected=is_selected,
+            is_hovered=is_hovered,
+            style="green",
+        )
 
-        line = f"{hero.name} | {hero.career_stage()}"
-        rendered_line = truncate_text(line, self.font, row_rect.width - 100)
+        button_reserved_width = 46
 
-        screen.blit(self.font.render(rendered_line, True, (210, 240, 210)), (row_rect.x + 12, row_rect.y + 11))
+        screen.blit(
+            self.font.render(
+                truncate_text(
+                    f"{hero.name} | Lv {hero.level}",
+                    self.font,
+                    row_rect.width - button_reserved_width - 24,
+                ),
+                True,
+                (210, 240, 210),
+            ),
+            (row_rect.x + 12, row_rect.y + 8),
+        )
+
+        TextBlock(
+            lines=[f"{hero.hero_class} | {hero.career_stage()} | Wage {hero.wage_per_year}g | Pwr {hero.combat_power()}"],
+            color=(180, 210, 180),
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 12,
+            y=row_rect.y + 38,
+            max_width=row_rect.width - button_reserved_width - 18,
+        )
 
     def draw_dungeon_row(self, screen, dungeon, row_rect, is_selected, is_hovered):
-        draw_selectable_row(screen, row_rect, is_selected, is_hovered, style="brown")
+        draw_selectable_row(
+            screen=screen,
+            rect=row_rect,
+            is_selected=is_selected,
+            is_hovered=is_hovered,
+            style="brown",
+        )
 
         mission_party_limit = self.party_limit_for_dungeon(dungeon)
 
-        line_1 = truncate_text(dungeon.name, self.font, row_rect.width - 24)
-        line_2 = f"Diff {dungeon.difficulty} | Party {mission_party_limit} | {dungeon.room_count} rooms"
-        line_3 = f"Loot {dungeon.loot_min}-{dungeon.loot_max}g"
+        screen.blit(
+            self.font.render(
+                truncate_text(dungeon.name, self.font, row_rect.width - 24),
+                True,
+                (240, 230, 210),
+            ),
+            (row_rect.x + 14, row_rect.y + 8),
+        )
 
-        screen.blit(self.font.render(line_1, True, (240, 230, 210)), (row_rect.x + 12, row_rect.y + 10))
-        screen.blit(self.font.render(line_2, True, (205, 195, 180)), (row_rect.x + 12, row_rect.y + 34))
-        screen.blit(self.font.render(line_3, True, (190, 180, 165)), (row_rect.x + 12, row_rect.y + 58))
+        StatusChip(
+            rect=(row_rect.x + 14, row_rect.y + 40, 78, 24),
+            text=f"Diff {dungeon.difficulty}",
+            style="warning" if dungeon.difficulty >= 3 else "info",
+        ).draw(screen, self.small_font)
+
+        StatusChip(
+            rect=(row_rect.x + 102, row_rect.y + 40, 92, 24),
+            text=f"Party {mission_party_limit}",
+            style="default",
+        ).draw(screen, self.small_font)
+
+        enemy_chip_width = min(120, max(84, 24 + len(dungeon.enemy_type) * 8))
+        StatusChip(
+            rect=(row_rect.x + 204, row_rect.y + 40, enemy_chip_width, 24),
+            text=dungeon.enemy_type,
+            style="default",
+        ).draw(screen, self.small_font)
+
+        TextBlock(
+            lines=[f"Loot {dungeon.loot_min}-{dungeon.loot_max}g | Enemy {dungeon.enemy_power} | Rooms {dungeon.room_count}"],
+            color=(205, 195, 180),
+            row_spacing=18,
+            max_lines=1,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=row_rect.x + 14,
+            y=row_rect.y + 76,
+            max_width=row_rect.width - 28,
+        )
 
     def draw_details(self, screen):
-        party_power = sum(hero.combat_power() for hero in self.selected_party)
-        expedition_cost = self.total_expedition_cost()
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
-        lines = [
-            f"Party Power: {party_power}",
-            f"Dispatch Cost: {expedition_cost}g",
+        panel = self.details_panel.rect
+        col1_x = panel.x + 28
+        col2_x = panel.x + 610
+        col3_x = panel.x + 1190
+        start_y = panel.y + 52
+
+        party_summary = PartySummary(self.selected_party)
+        party_summary.draw(screen, self.small_font, col1_x, start_y)
+
+        col1_lines = [
+            f"Dispatch Cost: {self.total_expedition_cost()}g",
             f"Selected Heroes: {', '.join(hero.name for hero in self.selected_party) or 'None'}",
         ]
 
-        if self.selected_party:
-            mentorship_total = sum(hero.mentorship_value() for hero in self.selected_party)
-            lines.append(f"Party Mentorship Value: {mentorship_total}")
+        if self.selected_party_hero is not None:
+            col1_lines.append(f"Selected Party Hero: {self.selected_party_hero.name}")
 
-        if self.selected_dungeon:
-            dungeon = self.selected_dungeon
-            lines.extend(
-                [
-                    f"Mission: {dungeon.name}",
-                    (
-                        f"Enemy: {dungeon.enemy_type}    "
-                        f"Enemy Power: {dungeon.enemy_power}    "
-                        f"Difficulty: {dungeon.difficulty}    "
-                        f"Party Limit: {self.party_limit()}"
-                    ),
-                ]
-            )
-        else:
-            lines.append("Mission: None selected")
-
-        self.details_panel.draw_lines(
+        TextBlock(
+            lines=col1_lines,
+            color=theme.TEXT_SECONDARY,
+            row_spacing=24,
+        ).draw(
             screen=screen,
-            title_font=self.title_font,
-            font=self.font,
-            lines=lines[:5],
-            max_width=1100,
+            font=self.small_font,
+            x=col1_x,
+            y=start_y + 92,
+            max_width=500,
+        )
+
+        if self.selected_dungeon is None:
+            TextBlock(
+                lines=[
+                    "Mission: None selected",
+                    "Pick a mission to set party size and risk level.",
+                ],
+                color=theme.TEXT_SECONDARY,
+                row_spacing=24,
+            ).draw(
+                screen=screen,
+                font=self.small_font,
+                x=col2_x,
+                y=start_y,
+                max_width=500,
+            )
+
+            TextBlock(
+                lines=[
+                    "Party Not Ready",
+                    "0 hero(es) assigned",
+                ],
+                color=theme.TEXT_MUTED,
+                row_spacing=24,
+            ).draw(
+                screen=screen,
+                font=self.small_font,
+                x=col3_x,
+                y=start_y + 32,
+                max_width=360,
+            )
+            return
+
+        dungeon = self.selected_dungeon
+
+        TimelineStrip(
+            rect=(col2_x, start_y + 2, 420, 18),
+            total_steps=max(1, self.party_limit()),
+            current_step=min(len(self.selected_party), max(0, self.party_limit() - 1)),
+        ).draw(screen)
+
+        TextBlock(
+            lines=[
+                f"Mission: {dungeon.name}",
+                f"Enemy: {dungeon.enemy_type}",
+                f"Enemy Power: {dungeon.enemy_power}",
+                f"Difficulty: {dungeon.difficulty}",
+                f"Party Limit: {self.party_limit()}",
+            ],
+            color=theme.TEXT_SECONDARY,
+            row_spacing=24,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=col2_x,
+            y=start_y + 32,
+            max_width=500,
+        )
+
+        col3_lines = [
+            f"Loot: {dungeon.loot_min}-{dungeon.loot_max}g",
+            "Party Ready" if self.can_start_expedition() else "Party Not Ready",
+            f"{len(self.selected_party)} hero(es) assigned",
+        ]
+
+        if self.selected_party_hero is not None:
+            col3_lines.append(f"Focused: {self.selected_party_hero.name}")
+
+        TextBlock(
+            lines=col3_lines,
+            color=(190, 220, 190) if self.can_start_expedition() else theme.TEXT_MUTED,
+            row_spacing=24,
+        ).draw(
+            screen=screen,
+            font=self.small_font,
+            x=col3_x,
+            y=start_y + 32,
+            max_width=360,
         )
 
     def build_all_buttons(self):
-        buttons = [Button(theme.HUB_BUTTON_RECT, "Hub", self.on_return_to_hub)]
+        buttons = [hub_button(self.on_return_to_hub)]
 
         buttons.extend(self.build_roster_buttons())
         buttons.extend(self.build_party_buttons())
-        buttons.append(Button((1010, 650, 190, 42), "Start Expedition", self.start_expedition))
+
+        footer_y = self.details_panel.rect.bottom - 54
+
+        label = "Start Expedition" if self.can_start_expedition() else "Cannot Start"
+        buttons.append(
+            action_button(
+                label,
+                self.start_expedition,
+                rect=(self.details_panel.rect.right - 220, footer_y, 190, 42),
+            )
+        )
 
         return buttons
 
@@ -232,10 +453,10 @@ class ExpeditionScene(SceneBase):
         for hero in self.roster_panel.visible_items():
             row_rect = self.roster_panel.row_rect(y)
             buttons.append(
-                Button(
-                    (row_rect.right - 88, row_rect.y + 6, 78, 28),
-                    "Add",
+                action_button(
+                    "+",
                     lambda h=hero: self.add_to_party(h),
+                    rect=(row_rect.right - 36, row_rect.y + 24, 24, 24),
                 )
             )
             y += self.roster_panel.row_spacing
@@ -249,10 +470,10 @@ class ExpeditionScene(SceneBase):
         for hero in self.party_panel.visible_items():
             row_rect = self.party_panel.row_rect(y)
             buttons.append(
-                Button(
-                    (row_rect.right - 86, row_rect.y + 6, 76, 28),
-                    "Remove",
+                action_button(
+                    "-",
                     lambda h=hero: self.remove_from_party(h),
+                    rect=(row_rect.right - 36, row_rect.y + 20, 24, 24),
                 )
             )
             y += self.party_panel.row_spacing
@@ -265,6 +486,12 @@ class ExpeditionScene(SceneBase):
             self.selected_dungeon = dungeon
             self.trim_party_to_limit()
             self.status_message = f"Selected mission: {dungeon.name}"
+            return
+
+        party_hero = self.party_panel.item_at_pos(pos)
+        if party_hero is not None:
+            self.selected_party_hero = party_hero
+            self.status_message = f"Selected party hero: {party_hero.name}"
 
     def add_to_party(self, hero):
         if hero in self.selected_party:
@@ -274,11 +501,16 @@ class ExpeditionScene(SceneBase):
             self.status_message = "Choose a mission first so party limit is known."
             return
 
+        if hero.injured_years_remaining > 0:
+            self.status_message = f"{hero.name} is injured and cannot be deployed."
+            return
+
         if len(self.selected_party) >= self.party_limit():
             self.status_message = f"This mission allows {self.party_limit()} hero(es)."
             return
 
         self.selected_party.append(hero)
+        self.selected_party_hero = hero
         self.sync_lists()
         self.status_message = f"Added {hero.name} to party."
 
@@ -287,6 +519,10 @@ class ExpeditionScene(SceneBase):
             return
 
         self.selected_party.remove(hero)
+
+        if self.selected_party_hero is hero:
+            self.selected_party_hero = None
+
         self.sync_lists()
         self.status_message = f"Removed {hero.name} from party."
 
@@ -313,6 +549,17 @@ class ExpeditionScene(SceneBase):
 
         self.on_start_expedition(list(self.selected_party), self.selected_dungeon)
 
+    def can_start_expedition(self):
+        if self.selected_dungeon is None:
+            return False
+        if not self.selected_party:
+            return False
+        if len(self.selected_party) > self.party_limit():
+            return False
+        if self.state.gold < self.total_expedition_cost():
+            return False
+        return True
+
     def total_expedition_cost(self):
         return sum(hero.wage_per_year for hero in self.selected_party)
 
@@ -328,13 +575,10 @@ class ExpeditionScene(SceneBase):
 
         if difficulty <= 1:
             return 1
-
         if difficulty == 2:
             return 2
-
         if difficulty == 3:
             return 3
-
         return 4
 
     def trim_party_to_limit(self):
