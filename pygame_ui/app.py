@@ -6,6 +6,8 @@ from save_system import load_game, save_exists, save_game
 from pygame_ui.scenes.game_hub_scene import GameHubScene
 from pygame_ui.scenes.main_menu_scene import MainMenuScene
 from pygame_ui.scenes.management_scene import ManagementScene
+from pygame_ui.scenes.expedition_scene import ExpeditionScene
+from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
 
 
 class App:
@@ -55,6 +57,7 @@ class App:
         self.scene = GameHubScene(
             state=self.state,
             on_open_guild=self.show_guild,
+            on_open_expedition=self.show_expedition,
             on_save_game=self.save_current_game,
             on_return_to_menu=self.show_main_menu,
             status_message=status_message,
@@ -63,6 +66,22 @@ class App:
     def show_guild(self):
         self.scene = ManagementScene(
             state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
+    def show_expedition(self):
+        self.scene = ExpeditionScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_start_expedition=self.show_expedition_run,
+        )
+
+    def show_expedition_run(self, party, dungeon):
+        self.scene = ExpeditionRunScene(
+            state=self.state,
+            party=party,
+            dungeon=dungeon,
             on_return_to_hub=self.show_game_hub,
             on_save_game=self.save_current_game,
         )
