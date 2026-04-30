@@ -7,6 +7,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text, wrap_text
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
 from pygame_ui.widgets.panel import Panel
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_text_panel import ScrollableTextPanel
@@ -125,22 +126,32 @@ class ExpeditionRunScene(SceneBase):
         self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
-        stats = (
-            f"Gold: {self.state.gold}g    "
-            f"Year: {self.state.year}    "
-            f"Room: {min(self.room_number, self.dungeon.room_count)}/{self.dungeon.room_count}    "
-            f"Loot: {self.loot_earned}g    "
-            f"XP: {self.xp_earned}"
-        )
-
         HeaderPanel(
             rect=(40, 30, 1840, 96),
             title="Expedition Run",
-            stats=stats,
+            stats="",
             status_message=self.status_message,
             stats_pos=(60, 74),
             status_pos=(1060, 112),
         ).draw(screen, self.title_font, self.header_font, self.font)
+
+        from pygame_ui.widgets.resource_header import ResourceHeader
+        ResourceHeader(
+            resources=[
+                ("Gold", f"{self.state.gold}g"),
+                ("Year", self.state.year),
+                ("Room", f"{min(self.room_number, self.dungeon.room_count)}/{self.dungeon.room_count}"),
+                ("Loot", f"{self.loot_earned}g"),
+                ("XP", self.xp_earned),
+            ],
+            spacing=190,
+            item_max_width=180,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
+        ).draw(screen, self.font, 60, 72)
 
     def draw_choices(self, screen):
         if self.expedition_finished:
@@ -444,39 +455,57 @@ class ExpeditionRunScene(SceneBase):
             border_radius=7,
         )
 
-        left_lines = [
-            f"Dungeon: {self.dungeon.name}",
-            f"Rooms Cleared: {self.rooms_completed}/{self.dungeon.room_count}",
-            f"Recovered Loot: {self.loot_earned}g",
-        ]
-
-        middle_lines = [
-            f"State: {self.current_state_text()}",
-            f"Enemy Type: {self.dungeon.enemy_type}",
-            f"Recovered XP: {self.xp_earned}",
-        ]
-
         focused = ", ".join(hero.name for hero in self.displayed_party()) if self.displayed_party() else "None"
-        right_lines = [
-            f"Focused Heroes: {focused}",
-            "Review the log to track all room outcomes.",
-        ]
 
-        self.draw_text_column(screen, left_lines, left_x, top_y + 24, 250)
-        self.draw_text_column(screen, middle_lines, middle_x, top_y + 24, 260)
-        self.draw_text_column(screen, right_lines, right_x, top_y + 24, 300)
+        KeyValueGrid(
+            rows=[
+                ("Dungeon", self.dungeon.name),
+                ("Rooms Cleared", f"{self.rooms_completed}/{self.dungeon.room_count}"),
+                ("Recovered Loot", f"{self.loot_earned}g"),
+            ],
+            columns=1,
+            column_width=250,
+            row_gap=8,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=20,
+            line_spacing=2,
+        ).draw(screen, self.font, left_x, top_y + 24)
 
-    def draw_text_column(self, screen, lines, x, y, max_width):
-        current_y = y
-        for line in lines:
-            wrapped = wrap_text(line, self.small_font, max_width)
-            for wrapped_line in wrapped:
-                screen.blit(
-                    self.small_font.render(wrapped_line, True, theme.TEXT_SECONDARY),
-                    (x, current_y),
-                )
-                current_y += 18
-            current_y += 4
+        KeyValueGrid(
+            rows=[
+                ("State", self.current_state_text()),
+                ("Enemy Type", self.dungeon.enemy_type),
+                ("Recovered XP", self.xp_earned),
+            ],
+            columns=1,
+            column_width=260,
+            row_gap=8,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=20,
+            line_spacing=2,
+        ).draw(screen, self.font, middle_x, top_y + 24)
+
+        KeyValueGrid(
+            rows=[
+                ("Focused Heroes", focused),
+                ("Notes", "Review the log to track all room outcomes."),
+            ],
+            columns=1,
+            column_width=300,
+            row_gap=8,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=20,
+            line_spacing=2,
+        ).draw(screen, self.font, right_x, top_y + 24)
 
     def build_buttons(self):
         buttons = []

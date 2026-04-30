@@ -5,6 +5,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
@@ -127,6 +128,12 @@ class MarketScene(SceneBase):
                 ("Refresh", f"{self.REFRESH_COST}g"),
             ],
             spacing=220,
+            item_max_width=180,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_shop_row(self, screen, item, row_rect, is_selected, is_hovered):
@@ -219,32 +226,63 @@ class MarketScene(SceneBase):
         price = self.item_price(item)
         can_afford = self.state.gold >= price
 
-        left_lines = [
-            f"Item: {item.name}",
-            f"Slot: {item.slot}",
-            f"Rarity: {item.rarity}",
-            f"Price: {price}g",
-            f"Status: {'Affordable' if can_afford else 'Not enough gold'}",
-        ]
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
-        right_lines = [
-            f"Bonuses: {self.item_bonus_summary(item)}",
-            f"Classes: {', '.join(item.class_restrictions) if item.class_restrictions else 'Any'}",
-            "Buying moves this item into guild inventory.",
-            "Market stock refreshes when you spend gold to reroll the shop.",
-        ]
+        left_x = self.details_panel.rect.x + 28
+        right_x = self.details_panel.rect.x + 620
+        top_y = self.details_panel.rect.y + 52
 
-        self.details_panel.draw(
+        KeyValueGrid(
+            rows=[
+                ("Item", item.name),
+                ("Slot", item.slot),
+                ("Rarity", item.rarity),
+                ("Price", f"{price}g"),
+                ("Status", "Affordable" if can_afford else "Not enough gold"),
+            ],
+            columns=1,
+            column_width=500,
+            row_gap=10,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
+        ).draw(
             screen=screen,
-            title_font=self.title_font,
             font=self.font,
-            left_lines=left_lines,
-            right_lines=right_lines,
+            x=left_x,
+            y=top_y,
+        )
+
+        KeyValueGrid(
+            rows=[
+                ("Bonuses", self.item_bonus_summary(item)),
+                ("Classes", ", ".join(item.class_restrictions) if item.class_restrictions else "Any"),
+                ("Purchase Result", "Buying moves this item into guild inventory."),
+                ("Stock Rules", "Market stock refreshes when you spend gold to reroll the shop."),
+            ],
+            columns=1,
+            column_width=1100,
+            row_gap=10,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
+        ).draw(
+            screen=screen,
+            font=self.font,
+            x=right_x,
+            y=top_y,
         )
 
     def build_buttons(self):
         buttons = [
             hub_button(self.on_return_to_hub),
+            action_button("Refresh Shop", self.refresh_shop, rect=(1460, 956, 180, 44)),
         ]
 
         if self.selected_shop_item is not None:

@@ -2,22 +2,19 @@ import pygame
 
 from game_state import create_game
 from save_system import load_game, save_exists, save_game
+from systems.rival_guilds import ensure_rival_guild_state
 
 from pygame_ui.dev_console import DevConsole
+from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
+from pygame_ui.scenes.expedition_scene import ExpeditionScene
 from pygame_ui.scenes.game_hub_scene import GameHubScene
+from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
+from pygame_ui.scenes.inventory_scene import InventoryScene
 from pygame_ui.scenes.main_menu_scene import MainMenuScene
 from pygame_ui.scenes.management_scene import ManagementScene
-from pygame_ui.scenes.expedition_scene import ExpeditionScene
-from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
-from pygame_ui.scenes.inventory_scene import InventoryScene
 from pygame_ui.scenes.market_scene import MarketScene
-from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
+from pygame_ui.scenes.rival_guilds_scene import RivalGuildsScene
 from pygame_ui.scenes.training_scene import TrainingScene
-
-
-MIN_WINDOW_WIDTH = 1280
-MIN_WINDOW_HEIGHT = 720
-WINDOW_FLAGS = pygame.RESIZABLE
 
 
 class App:
@@ -39,7 +36,8 @@ class App:
 
     def start_new_game(self):
         self.state = create_game()
-        self.show_game_hub("New game started.")
+        ensure_rival_guild_state(self.state)
+        self.show_game_hub()
 
     def load_game(self):
         if not save_exists():
@@ -48,11 +46,12 @@ class App:
 
         try:
             self.state = load_game()
+            ensure_rival_guild_state(self.state)
         except Exception as exc:
             print(f"Failed to load game: {exc}")
             return
 
-        self.show_game_hub("Loaded saved game.")
+        self.show_game_hub()
 
     def save_current_game(self):
         if self.state is None:
@@ -64,7 +63,7 @@ class App:
         except Exception as exc:
             print(f"Save failed: {exc}")
 
-    def show_game_hub(self, status_message="Game hub."):
+    def show_game_hub(self, status_message=""):
         self.scene = GameHubScene(
             state=self.state,
             on_open_guild=self.show_guild,
@@ -73,6 +72,7 @@ class App:
             on_open_market=self.show_market,
             on_open_training=self.show_training,
             on_open_upgrades=self.show_guild_upgrades,
+            on_open_rivals=self.show_rival_guilds,
             on_save_game=self.save_current_game,
             on_return_to_menu=self.show_main_menu,
             status_message=status_message,
@@ -110,7 +110,7 @@ class App:
 
     def show_market(self):
         if not self.state.guild_upgrades.market_unlocked:
-            self.show_game_hub("Market is locked. Buy the Open Guild Market upgrade first.")
+            self.show_game_hub()
             return
 
         self.scene = MarketScene(
@@ -121,7 +121,7 @@ class App:
 
     def show_training(self):
         if self.state.guild_upgrades.training_hall_level <= 0:
-            self.show_game_hub("Training Hall is locked. Buy the Build Training Hall upgrade first.")
+            self.show_game_hub()
             return
 
         self.scene = TrainingScene(
@@ -137,17 +137,15 @@ class App:
             on_save_game=self.save_current_game,
         )
 
+    def show_rival_guilds(self):
+        self.scene = RivalGuildsScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
     def quit_game(self):
         self.running = False
-
-    def resize_window(self, width, height):
-        clamped_width = max(MIN_WINDOW_WIDTH, width)
-        clamped_height = max(MIN_WINDOW_HEIGHT, height)
-
-        self.screen = pygame.display.set_mode(
-            (clamped_width, clamped_height),
-            WINDOW_FLAGS,
-        )
 
     def run(self):
         while self.running:
@@ -156,10 +154,6 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                    continue
-
-                if event.type == pygame.VIDEORESIZE:
-                    self.resize_window(event.w, event.h)
                     continue
 
                 handled_by_console = self.dev_console.handle_event(event)

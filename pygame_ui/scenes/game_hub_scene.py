@@ -2,6 +2,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.widgets.card import Card
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.label_value_text import LabelValueText
 from pygame_ui.widgets.navigation_buttons import main_menu_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.section_title import SectionTitle
@@ -22,6 +23,7 @@ class GameHubScene(SceneBase):
         on_open_market,
         on_open_training,
         on_open_upgrades,
+        on_open_rivals,
         on_save_game,
         on_return_to_menu,
         status_message="",
@@ -35,6 +37,7 @@ class GameHubScene(SceneBase):
         self.on_open_market = on_open_market
         self.on_open_training = on_open_training
         self.on_open_upgrades = on_open_upgrades
+        self.on_open_rivals = on_open_rivals
         self.on_save_game = on_save_game
         self.on_return_to_menu = on_return_to_menu
         self.status_message = status_message
@@ -78,18 +81,41 @@ class GameHubScene(SceneBase):
                 ("Classes", ", ".join(upgrades.unlocked_classes)),
             ],
             spacing=185,
+            item_max_width=170,
+            font_size=30,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=False,
         ).draw(screen, self.font, 60, 82)
 
-        second_line = (
-            f"Recruit Cap Lv {upgrades.recruit_level_cap}    "
-            f"Mission Cap Diff {upgrades.mission_difficulty_cap}    "
-            f"Training Hall Lv {upgrades.training_hall_level}    "
-            f"Crown Stipend {upgrades.crown_stipend}g"
-        )
-        screen.blit(
-            self.font.render(second_line, True, theme.TEXT_MUTED),
-            (60, 112),
-        )
+        second_row_y = 112
+        second_row_x = 60
+        second_row_gap = 290
+
+        header_pairs = [
+            ("Recruit Cap", f"Lv {upgrades.recruit_level_cap}"),
+            ("Mission Cap", f"Diff {upgrades.mission_difficulty_cap}"),
+            ("Training Hall", f"Lv {upgrades.training_hall_level}"),
+            ("Crown Stipend", f"{upgrades.crown_stipend}g"),
+        ]
+
+        for index, (label, value) in enumerate(header_pairs):
+            LabelValueText(
+                label=label,
+                value=value,
+                label_color=theme.TEXT_MUTED,
+                value_color=theme.TEXT_PRIMARY,
+                label_bold=True,
+                value_bold=True,
+                font_size=24,
+            ).draw(
+                screen=screen,
+                font=self.font,
+                x=second_row_x + (index * second_row_gap),
+                y=second_row_y,
+                max_width=260,
+            )
 
     def draw_main_cards(self, screen):
         self.draw_management_card(screen)
@@ -155,7 +181,7 @@ class GameHubScene(SceneBase):
         TextBlock(
             lines=[
                 "Upgrades unlock classes, improve roster size, raise recruit level caps, and expand mission access.",
-                "Market availability and training access are also driven by guild upgrades.",
+                "Market availability, training access, and rival awareness are driven by guild upgrades and long-term growth.",
             ],
             color=theme.TEXT_SECONDARY,
             row_spacing=26,
@@ -201,6 +227,7 @@ class GameHubScene(SceneBase):
                 "Expeditions are the primary source of gold, XP, and risk.",
                 "Stronger missions require larger parties and better preparation.",
                 "Deaths and injuries can permanently affect your guild’s future.",
+                "Rival guilds now maintain their own tracked rosters and market pickups.",
             ],
             color=theme.TEXT_SECONDARY,
             row_spacing=26,
@@ -213,7 +240,7 @@ class GameHubScene(SceneBase):
         )
 
         StatusChip((1306, 430, 140, 28), "Expeditions", "warning").draw(screen, self.small_font)
-        StatusChip((1456, 430, 120, 28), "Campaign", "info").draw(screen, self.small_font)
+        StatusChip((1456, 430, 120, 28), "Rivals", "info").draw(screen, self.small_font)
         StatusChip((1586, 430, 120, 28), "Menu", "default").draw(screen, self.small_font)
 
     def draw_footer_summary(self, screen):
@@ -228,37 +255,54 @@ class GameHubScene(SceneBase):
         ).draw(screen, self.title_font, self.font)
 
         upgrades = self.state.guild_upgrades
+        rival_count = len(getattr(self.state, "rival_guilds", []))
 
-        left_lines = [
-            f"Gold Available: {self.state.gold}g",
-            f"Roster: {len(self.state.roster)}/{upgrades.roster_capacity}",
-            f"Available Recruits: {len(self.state.available_contracts)}",
-            f"Inventory Items: {len(self.state.inventory)}",
+        left_pairs = [
+            ("Gold Available", f"{self.state.gold}g"),
+            ("Roster", f"{len(self.state.roster)}/{upgrades.roster_capacity}"),
+            ("Available Recruits", len(self.state.available_contracts)),
+            ("Inventory Items", len(self.state.inventory)),
         ]
 
-        middle_lines = [
-            f"Unlocked Classes: {', '.join(upgrades.unlocked_classes)}",
-            f"Training Hall Level: {upgrades.training_hall_level}",
-            f"Market: {'Unlocked' if upgrades.market_unlocked else 'Locked'}",
-            f"Crown Stipend: {upgrades.crown_stipend}g",
+        middle_pairs = [
+            ("Unlocked Classes", ", ".join(upgrades.unlocked_classes)),
+            ("Training Hall Level", upgrades.training_hall_level),
+            ("Market", "Locked" if not upgrades.market_unlocked else "Unlocked"),
+            ("Crown Stipend", f"{upgrades.crown_stipend}g"),
         ]
 
-        right_lines = [
-            f"Campaign Year: {self.state.year}",
-            f"Completed Expeditions: {self.state.expedition - 1}",
-            f"Mission Difficulty Cap: {upgrades.mission_difficulty_cap}",
-            f"Recruit Level Cap: {upgrades.recruit_level_cap}",
+        right_pairs = [
+            ("Campaign Year", self.state.year),
+            ("Completed Expeditions", self.state.expedition - 1),
+            ("Mission Difficulty Cap", upgrades.mission_difficulty_cap),
+            ("Tracked Rival Guilds", rival_count),
         ]
 
-        TextBlock(left_lines, color=theme.TEXT_SECONDARY, row_spacing=26).draw(
-            screen, self.font, 66, 778, 480
-        )
-        TextBlock(middle_lines, color=theme.TEXT_SECONDARY, row_spacing=26).draw(
-            screen, self.font, 690, 778, 480
-        )
-        TextBlock(right_lines, color=theme.TEXT_SECONDARY, row_spacing=26).draw(
-            screen, self.font, 1310, 778, 480
-        )
+        self.draw_label_value_column(screen, left_pairs, 66, 778, 480)
+        self.draw_label_value_column(screen, middle_pairs, 690, 778, 480)
+        self.draw_label_value_column(screen, right_pairs, 1310, 778, 480)
+
+    def draw_label_value_column(self, screen, pairs, x, y, max_width):
+        current_y = y
+        row_spacing = 26
+
+        for label, value in pairs:
+            LabelValueText(
+                label=label,
+                value=value,
+                label_color=theme.TEXT_PRIMARY,
+                value_color=theme.TEXT_PRIMARY,
+                label_bold=True,
+                value_bold=False,
+                font_size=24,
+            ).draw(
+                screen=screen,
+                font=self.font,
+                x=x,
+                y=current_y,
+                max_width=max_width,
+            )
+            current_y += row_spacing
 
     def build_buttons(self):
         return [
@@ -269,7 +313,8 @@ class GameHubScene(SceneBase):
             Button((930, 500, 220, 56), "Upgrades", self.on_open_upgrades),
             Button((810, 570, 220, 56), "Training", self.on_open_training),
 
-            Button((1330, 520, 220, 56), "Expedition", self.on_open_expedition),
+            Button((1330, 500, 220, 56), "Expedition", self.on_open_expedition),
+            Button((1570, 500, 220, 56), "Rivals", self.on_open_rivals),
 
             main_menu_button(self.on_return_to_menu, rect=(1650, 930, 180, 52)),
         ]

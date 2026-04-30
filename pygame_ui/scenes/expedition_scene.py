@@ -3,6 +3,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.party_summary import PartySummary
 from pygame_ui.widgets.resource_header import ResourceHeader
@@ -162,6 +163,12 @@ class ExpeditionScene(SceneBase):
                 ("Party", f"{len(self.selected_party)}/{party_cap_text}"),
             ],
             spacing=210,
+            item_max_width=180,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
@@ -177,7 +184,6 @@ class ExpeditionScene(SceneBase):
         )
 
         subclass = hero.subclass or "Base"
-
         button_reserved_width = 46
 
         screen.blit(
@@ -328,56 +334,61 @@ class ExpeditionScene(SceneBase):
         party_summary = PartySummary(self.selected_party)
         party_summary.draw(screen, self.small_font, col1_x, start_y)
 
-        col1_lines = [
-            f"Dispatch Cost: {self.total_expedition_cost()}g",
-            f"Selected Heroes: {', '.join(hero.name for hero in self.selected_party) or 'None'}",
-        ]
-
-        if self.selected_party_hero is not None:
-            col1_lines.append(f"Selected Party Hero: {self.selected_party_hero.name}")
-
-        TextBlock(
-            lines=col1_lines,
-            color=theme.TEXT_SECONDARY,
-            row_spacing=24,
+        left_grid_y = start_y + 92
+        KeyValueGrid(
+            rows=[
+                ("Dispatch Cost", f"{self.total_expedition_cost()}g"),
+                ("Selected Heroes", ", ".join(hero.name for hero in self.selected_party) or "None"),
+                ("Focused Hero", self.selected_party_hero.name if self.selected_party_hero is not None else "None"),
+            ],
+            columns=1,
+            column_width=500,
+            row_gap=10,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
         ).draw(
             screen=screen,
-            font=self.small_font,
+            font=self.font,
             x=col1_x,
-            y=start_y + 92,
-            max_width=500,
+            y=left_grid_y,
         )
 
         if self.selected_dungeon is None:
-            TextBlock(
-                lines=[
-                    "Mission: None selected",
-                    "Pick a mission to set party size and risk level.",
+            KeyValueGrid(
+                rows=[
+                    ("Mission", "None selected"),
+                    ("Guidance", "Pick a mission to set party size and risk level."),
                 ],
-                color=theme.TEXT_SECONDARY,
-                row_spacing=24,
-            ).draw(
-                screen=screen,
-                font=self.small_font,
-                x=col2_x,
-                y=start_y,
-                max_width=500,
-            )
+                columns=1,
+                column_width=500,
+                row_gap=10,
+                label_color=theme.TEXT_MUTED,
+                value_color=theme.TEXT_PRIMARY,
+                label_bold=True,
+                value_bold=False,
+                font_size=22,
+                line_spacing=2,
+            ).draw(screen, self.font, col2_x, start_y)
 
-            TextBlock(
-                lines=[
-                    "Party Not Ready",
-                    "0 hero(es) assigned",
+            KeyValueGrid(
+                rows=[
+                    ("Party Status", "Not Ready"),
+                    ("Assigned", "0 hero(es)"),
                 ],
-                color=theme.TEXT_MUTED,
-                row_spacing=24,
-            ).draw(
-                screen=screen,
-                font=self.small_font,
-                x=col3_x,
-                y=start_y + 32,
-                max_width=360,
-            )
+                columns=1,
+                column_width=360,
+                row_gap=10,
+                label_color=theme.TEXT_MUTED,
+                value_color=theme.TEXT_MUTED,
+                label_bold=True,
+                value_bold=False,
+                font_size=22,
+                line_spacing=2,
+            ).draw(screen, self.font, col3_x, start_y + 32)
             return
 
         dungeon = self.selected_dungeon
@@ -388,43 +399,51 @@ class ExpeditionScene(SceneBase):
             current_step=min(len(self.selected_party), max(0, self.party_limit() - 1)),
         ).draw(screen)
 
-        TextBlock(
-            lines=[
-                f"Mission: {dungeon.name}",
-                f"Enemy: {dungeon.enemy_type}",
-                f"Enemy Power: {dungeon.enemy_power}",
-                f"Difficulty: {dungeon.difficulty}",
-                f"Party Limit: {self.party_limit()}",
+        KeyValueGrid(
+            rows=[
+                ("Mission", dungeon.name),
+                ("Enemy Type", dungeon.enemy_type),
+                ("Enemy Power", dungeon.enemy_power),
+                ("Difficulty", dungeon.difficulty),
+                ("Party Limit", self.party_limit()),
             ],
-            color=theme.TEXT_SECONDARY,
-            row_spacing=24,
+            columns=1,
+            column_width=500,
+            row_gap=10,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
         ).draw(
             screen=screen,
-            font=self.small_font,
+            font=self.font,
             x=col2_x,
             y=start_y + 32,
-            max_width=500,
         )
 
-        col3_lines = [
-            f"Loot: {dungeon.loot_min}-{dungeon.loot_max}g",
-            "Party Ready" if self.can_start_expedition() else "Party Not Ready",
-            f"{len(self.selected_party)} hero(es) assigned",
-        ]
-
-        if self.selected_party_hero is not None:
-            col3_lines.append(f"Focused: {self.selected_party_hero.name}")
-
-        TextBlock(
-            lines=col3_lines,
-            color=(190, 220, 190) if self.can_start_expedition() else theme.TEXT_MUTED,
-            row_spacing=24,
+        KeyValueGrid(
+            rows=[
+                ("Loot", f"{dungeon.loot_min}-{dungeon.loot_max}g"),
+                ("Party Status", "Ready" if self.can_start_expedition() else "Not Ready"),
+                ("Assigned", f"{len(self.selected_party)} hero(es)"),
+                ("Focused", self.selected_party_hero.name if self.selected_party_hero is not None else "None"),
+            ],
+            columns=1,
+            column_width=360,
+            row_gap=10,
+            label_color=theme.TEXT_MUTED,
+            value_color=(190, 220, 190) if self.can_start_expedition() else theme.TEXT_MUTED,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
         ).draw(
             screen=screen,
-            font=self.small_font,
+            font=self.font,
             x=col3_x,
             y=start_y + 32,
-            max_width=360,
         )
 
     def build_all_buttons(self):

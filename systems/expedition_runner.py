@@ -1,11 +1,10 @@
 from typing import List
 
-from game_state import GameState, refresh_contract_market
+from game_state import GameState
 from manager_reputation import reputation_for_level_up
 from models import Dungeon, Hero
 from .room_system import choose_room_option, print_room_result, resolve_room
 from .survivor_system import remove_temporary_survivors_from_party
-from .wage_system import advance_one_year_after_room
 from ui import bold, danger, info, success, warning
 
 
@@ -51,10 +50,9 @@ def simulate_multi_stage_dungeon(state: GameState, party: List[Hero], dungeon: D
             loot_earned += resolution.loot
             xp_earned += resolution.xp
             state.gold += resolution.loot
-            room_messages.append(success(f"Gold after recovered room loot: {state.gold}g."))
 
-        year_messages = advance_one_year_after_room(state, party, room_number)
-        room_messages.extend(year_messages)
+            if resolution.loot > 0:
+                room_messages.append(success(f"Gold after recovered room loot: {state.gold}g."))
 
         expedition_summary.extend(room_messages)
         print_room_result(room_messages, party)
@@ -89,12 +87,18 @@ def simulate_multi_stage_dungeon(state: GameState, party: List[Hero], dungeon: D
 
     return expedition_summary
 
+
 def finish_expedition(state: GameState, dungeon: Dungeon) -> List[str]:
     messages = [bold("=== Expedition Cleanup ===")]
 
     state.expedition += 1
-    refresh_contract_market(state)
 
-    messages.append(info("Time, wages, contracts, injuries, and retirement were processed room-by-room."))
+    messages.append(
+        info(f"Expedition record updated. Total completed runs: {state.expedition - 1}.")
+    )
+    messages.append(info(f"The guild returns from {dungeon.name}."))
+    messages.append(
+        info("Campaign time, contract countdown, injuries, satisfaction, and retirement are resolved during campaign cycle processing.")
+    )
+
     return messages
-

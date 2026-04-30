@@ -4,6 +4,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
@@ -132,6 +133,12 @@ class TrainingScene(SceneBase):
                 ("Roster", len(self.state.roster)),
             ],
             spacing=190,
+            item_max_width=170,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
@@ -225,42 +232,35 @@ class TrainingScene(SceneBase):
         hero = self.selected_hero
         allowed, reason = can_train_hero(hero)
 
-        left_lines = [
-            f"Hero: {hero.name}",
-            f"Class: {hero.hero_class}",
-            f"Subclass: {hero.subclass or 'None'}",
-            f"Ability: {hero.special_ability or 'None'}",
-            f"Status: {'Ready' if allowed else reason}",
-        ]
-
-        right_lines = [
-            f"Level: {hero.level}",
-            f"XP: {hero.xp}/{hero.xp_to_next_level()}",
-            f"Power: {hero.combat_power()}",
-            f"Mentor: {hero.mentorship_value()}",
-            f"Age: {hero.age}",
-        ]
-
-        start_x = self.details_panel.rect.x + 30
-        start_y = self.details_panel.rect.y + 72
-        column_width = 280
-
-        for line in left_lines:
-            screen.blit(
-                self.font.render(line, True, theme.TEXT_SECONDARY),
-                (start_x, start_y),
-            )
-            start_y += 28
-
-        right_x = self.details_panel.rect.x + column_width
-        right_y = self.details_panel.rect.y + 72
-
-        for line in right_lines:
-            screen.blit(
-                self.font.render(line, True, theme.TEXT_SECONDARY),
-                (right_x, right_y),
-            )
-            right_y += 28
+        KeyValueGrid(
+            rows=[
+                ("Hero", hero.name),
+                ("Class", hero.hero_class),
+                ("Subclass", hero.subclass or "None"),
+                ("Ability", hero.special_ability or "None"),
+                ("Status", "Ready" if allowed else reason),
+                ("Level", hero.level),
+                ("XP", f"{hero.xp}/{hero.xp_to_next_level()}"),
+                ("Power", hero.combat_power()),
+                ("Mentor", hero.mentorship_value()),
+                ("Age", hero.age),
+            ],
+            columns=2,
+            column_width=270,
+            column_gap=24,
+            row_gap=12,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
+        ).draw(
+            screen=screen,
+            font=self.font,
+            x=self.details_panel.rect.x + 30,
+            y=self.details_panel.rect.y + 72,
+        )
 
     def draw_footer(self, screen):
         self.footer_panel.details_panel.panel.draw(screen, self.title_font)

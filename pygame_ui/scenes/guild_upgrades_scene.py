@@ -2,6 +2,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.widgets.header_panel import HeaderPanel
 from pygame_ui.widgets.key_value_grid import KeyValueGrid
+from pygame_ui.widgets.label_value_text import LabelValueText
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.section_title import SectionTitle
@@ -104,6 +105,12 @@ class GuildUpgradesScene(SceneBase):
                 ("Training", f"Lv {upgrades.training_hall_level}"),
             ],
             spacing=190,
+            item_max_width=170,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_upgrade_row(self, screen, row, row_rect, is_selected, is_hovered):
@@ -182,18 +189,20 @@ class GuildUpgradesScene(SceneBase):
                 ("Training", f"Lv {upgrades.training_hall_level}"),
             ],
             columns=1,
-            label_width=140,
             column_width=500,
-            row_spacing=30,
+            row_gap=12,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=True,
+            value_bold=False,
+            font_size=22,
+            line_spacing=2,
         ).draw(
             screen=screen,
             font=self.font,
             x=1190,
             y=270,
         )
-
-        chip_y = 560
-        chip_x = 1190
 
         chips = [
             ("Market", "good" if upgrades.market_unlocked else "locked"),
@@ -203,24 +212,30 @@ class GuildUpgradesScene(SceneBase):
             (f"Recruit Lv {upgrades.recruit_level_cap}", "info"),
         ]
 
-        for label, style in chips:
-            StatusChip((chip_x, chip_y, 132, 30), label, style).draw(screen, self.small_font)
-            chip_x += 144
+        start_x = 1190
+        start_y = 560
+        chip_height = 30
+        chip_gap_x = 12
+        chip_gap_y = 12
+        max_row_width = 620
 
-        TextBlock(
-            lines=[
-                "Upgrades are your main tycoon progression layer.",
-                "Use them to unlock services, recruit stronger heroes, and access harder missions.",
-            ],
-            color=theme.TEXT_SECONDARY,
-            row_spacing=24,
-        ).draw(
-            screen=screen,
-            font=self.font,
-            x=1190,
-            y=620,
-            max_width=620,
-        )
+        current_x = start_x
+        current_y = start_y
+
+        for label, style in chips:
+            chip_width = max(132, 36 + len(label) * 8)
+
+            if current_x > start_x and (current_x - start_x + chip_width) > max_row_width:
+                current_x = start_x
+                current_y += chip_height + chip_gap_y
+
+            StatusChip(
+                (current_x, current_y, chip_width, chip_height),
+                label,
+                style,
+            ).draw(screen, self.small_font)
+
+            current_x += chip_width + chip_gap_x
 
     def draw_details(self, screen):
         if self.selected_upgrade_id is None:
@@ -256,7 +271,7 @@ class GuildUpgradesScene(SceneBase):
         right_lines = [
             definition["description"],
             "Guild upgrades permanently improve your strategic options.",
-            "Some upgrades unlock new screens or services, while others raise limits and scaling."
+            "Some upgrades unlock new screens or services, while others raise limits and scaling.",
         ]
 
         self.details_panel.draw(

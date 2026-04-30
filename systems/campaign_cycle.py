@@ -1,5 +1,10 @@
 from typing import Iterable, List
 
+from systems.contract_lifecycle import (
+    collect_expired_heroes,
+    decrement_contracts_for_party,
+)
+from systems.rival_guilds import advance_rival_guilds, add_market_history_entry
 
 CAMPAIGN_YEARS_PASSED = 2
 
@@ -16,21 +21,30 @@ class CampaignCycleManager:
     def advance_cycle(self, participating_heroes: Iterable) -> List[str]:
         messages = []
 
+        participating_heroes = list(participating_heroes)
         participating_hero_ids = {id(hero) for hero in participating_heroes}
 
-        messages.append("=== Campaign Cycle Resolution ===")
-        messages.append(f"{CAMPAIGN_YEARS_PASSED} years pass across the realm.")
+        header = "=== Campaign Cycle Resolution ==="
+        messages.append(header)
+        add_market_history_entry(self.state, header)
+
+        time_message = f"{CAMPAIGN_YEARS_PASSED} years pass across the realm."
+        messages.append(time_message)
 
         self.state.year += CAMPAIGN_YEARS_PASSED
 
         stipend = self.state.guild_upgrades.crown_stipend
         self.state.gold += stipend
-        messages.append(f"The Crown grants the guild a {stipend}g campaign stipend.")
+        stipend_message = f"The Crown grants the guild a {stipend}g campaign stipend."
+        messages.append(stipend_message)
 
         messages.extend(self.advance_hero_time(participating_hero_ids))
+        messages.extend(decrement_contracts_for_party(participating_heroes))
         messages.extend(self.cleanup_roster())
+        messages.extend(collect_expired_heroes(self.state))
+        messages.extend(advance_rival_guilds(self.state, years_passed=CAMPAIGN_YEARS_PASSED))
 
-        return messages
+        return [message for message in messages if message]
 
     def advance_hero_time(self, participating_hero_ids) -> List[str]:
         messages = []
@@ -105,11 +119,17 @@ class CampaignCycleManager:
                 messages.append(
                     f"{hero.name} abandoned the guild due to low morale."
                 )
+                add_market_history_entry(
+                    self.state,
+                    f"{hero.name} abandoned the guild due to low morale.",
+                )
                 continue
 
             if hero.should_retire():
                 self.state.retired_heroes.append(hero)
-                messages.append(f"{hero.name} retired from adventuring at age {hero.age}.")
+                message = f"{hero.name} retired from adventuring at age {hero.age}."
+                messages.append(message)
+                add_market_history_entry(self.state, message)
                 continue
 
             remaining_roster.append(hero)

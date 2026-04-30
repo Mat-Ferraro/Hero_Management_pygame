@@ -6,6 +6,7 @@ from game_state import BereavementPayment, GameState
 from manager_reputation import ManagerReputation
 from models import Dungeon, Hero, Item
 from systems.guild_upgrades import guild_upgrades_from_dict, guild_upgrades_to_dict
+from systems.rival_guilds import ensure_rival_guild_state
 
 
 SAVE_DIR = Path("saves")
@@ -177,9 +178,59 @@ def bereavement_from_dict(data: Dict) -> BereavementPayment:
     )
 
 
-def game_state_to_dict(state: GameState) -> Dict:
+def rival_guild_to_dict(guild: Dict) -> Dict:
     return {
-        "version": 5,
+        "name": guild.get("name", "Unknown Rival"),
+        "style": guild.get("style", "Unknown"),
+        "wealth_bias": int(guild.get("wealth_bias", 0)),
+        "aggression": int(guild.get("aggression", 0)),
+        "prestige": int(guild.get("prestige", 0)),
+        "rookie_interest": int(guild.get("rookie_interest", 0)),
+        "class_preference": guild.get("class_preference"),
+        "tagline": guild.get("tagline", ""),
+        "roster": [hero_to_dict(hero) for hero in guild.get("roster", [])],
+        "total_signings": int(guild.get("total_signings", 0)),
+        "recent_pickups": list(guild.get("recent_pickups", [])),
+    }
+
+
+def rival_guild_from_dict(data: Dict) -> Dict:
+    return {
+        "name": data.get("name", "Unknown Rival"),
+        "style": data.get("style", "Unknown"),
+        "wealth_bias": int(data.get("wealth_bias", 0)),
+        "aggression": int(data.get("aggression", 0)),
+        "prestige": int(data.get("prestige", 0)),
+        "rookie_interest": int(data.get("rookie_interest", 0)),
+        "class_preference": data.get("class_preference"),
+        "tagline": data.get("tagline", ""),
+        "roster": [hero_from_dict(hero_data) for hero_data in data.get("roster", [])],
+        "total_signings": int(data.get("total_signings", 0)),
+        "recent_pickups": list(data.get("recent_pickups", [])),
+    }
+
+
+def contract_offer_to_dict(offer: Dict) -> Dict:
+    return {
+        "hero_name": offer.get("hero_name", ""),
+        "offered_campaigns": int(offer.get("offered_campaigns", 1)),
+        "offered_signing_fee": int(offer.get("offered_signing_fee", 25)),
+    }
+
+
+def contract_offer_from_dict(data: Dict) -> Dict:
+    return {
+        "hero_name": data.get("hero_name", ""),
+        "offered_campaigns": int(data.get("offered_campaigns", 1)),
+        "offered_signing_fee": int(data.get("offered_signing_fee", 25)),
+    }
+
+
+def game_state_to_dict(state: GameState) -> Dict:
+    ensure_rival_guild_state(state)
+
+    return {
+        "version": 8,
         "expedition": state.expedition,
         "year": state.year,
         "gold": state.gold,
@@ -194,11 +245,16 @@ def game_state_to_dict(state: GameState) -> Dict:
             bereavement_to_dict(payment) for payment in state.pending_bereavement_payments
         ],
         "guild_upgrades": guild_upgrades_to_dict(state.guild_upgrades),
+        "rival_guilds": [rival_guild_to_dict(guild) for guild in state.rival_guilds],
+        "contract_offers": [contract_offer_to_dict(offer) for offer in state.contract_offers],
+        "renewal_offers": [contract_offer_to_dict(offer) for offer in state.renewal_offers],
+        "contract_round": int(state.contract_round),
+        "market_history": list(state.market_history),
     }
 
 
 def game_state_from_dict(data: Dict) -> GameState:
-    return GameState(
+    state = GameState(
         expedition=int(data["expedition"]),
         year=int(data["year"]),
         gold=int(data["gold"]),
@@ -216,7 +272,15 @@ def game_state_from_dict(data: Dict) -> GameState:
             for payment_data in data.get("pending_bereavement_payments", [])
         ],
         guild_upgrades=guild_upgrades_from_dict(data.get("guild_upgrades")),
+        rival_guilds=[rival_guild_from_dict(guild_data) for guild_data in data.get("rival_guilds", [])],
+        contract_offers=[contract_offer_from_dict(offer_data) for offer_data in data.get("contract_offers", [])],
+        renewal_offers=[contract_offer_from_dict(offer_data) for offer_data in data.get("renewal_offers", [])],
+        contract_round=int(data.get("contract_round", 1)),
+        market_history=list(data.get("market_history", [])),
     )
+
+    ensure_rival_guild_state(state)
+    return state
 
 
 def save_game(state: GameState, path: Path = DEFAULT_SAVE_PATH) -> Path:

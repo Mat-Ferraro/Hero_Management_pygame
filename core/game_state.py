@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 from data_loader import load_dungeons, load_items
 from hero_generator import generate_contract_market
 from manager_reputation import ManagerReputation
 from models import Dungeon, Hero, Item
 from systems.guild_upgrades import GuildUpgrades
+from systems.rival_guilds import ensure_rival_guild_state
 
 
 @dataclass
@@ -28,6 +29,11 @@ class GameState:
     reputation: ManagerReputation = field(default_factory=ManagerReputation)
     pending_bereavement_payments: List[BereavementPayment] = field(default_factory=list)
     guild_upgrades: GuildUpgrades = field(default_factory=GuildUpgrades)
+    rival_guilds: List[Dict] = field(default_factory=list)
+    contract_offers: List[Dict] = field(default_factory=list)
+    renewal_offers: List[Dict] = field(default_factory=list)
+    contract_round: int = 1
+    market_history: List[str] = field(default_factory=list)
 
 
 def create_dungeons() -> List[Dungeon]:
@@ -59,6 +65,11 @@ def create_game() -> GameState:
         available_contracts=[],
         inventory=[],
         dungeons=create_dungeons(),
+        contract_offers=[],
+        renewal_offers=[],
+        contract_round=1,
+        market_history=[],
     )
     refresh_contract_market(state)
+    ensure_rival_guild_state(state)
     return state

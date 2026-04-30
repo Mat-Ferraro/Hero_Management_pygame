@@ -2,6 +2,7 @@ from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
 from pygame_ui.widgets.header_panel import HeaderPanel
+from pygame_ui.widgets.key_value_grid import KeyValueGrid
 from pygame_ui.widgets.navigation_buttons import action_button, hub_button
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
@@ -147,6 +148,12 @@ class InventoryScene(SceneBase):
                 ("Equipped", self.total_equipped_items()),
             ],
             spacing=210,
+            item_max_width=180,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_item_row(self, screen, item, row_rect, is_selected, is_hovered):
@@ -297,16 +304,91 @@ class InventoryScene(SceneBase):
             )
             return
 
-        left_lines = self.item_detail_lines(detail_item) if detail_item else ["Item: None selected"]
-        right_lines = self.hero_detail_lines(self.selected_hero) if self.selected_hero else ["Hero: None selected"]
+        if detail_item is None:
+            left_lines = ["Item: None selected"]
+        else:
+            left_lines = []
 
-        self.details_panel.draw(
-            screen=screen,
-            title_font=self.title_font,
-            font=self.font,
-            left_lines=left_lines,
-            right_lines=right_lines,
-        )
+        if self.selected_hero is None:
+            right_lines = ["Hero: None selected"]
+        else:
+            right_lines = []
+
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
+
+        left_x = self.details_panel.rect.x + 28
+        right_x = self.details_panel.rect.x + 640
+        top_y = self.details_panel.rect.y + 52
+
+        if detail_item is not None:
+            KeyValueGrid(
+                rows=[
+                    ("Item", detail_item.name),
+                    ("Slot", detail_item.slot),
+                    ("Rarity", detail_item.rarity),
+                    ("Value", f"{detail_item.value}g"),
+                    ("Classes", ", ".join(detail_item.class_restrictions) if detail_item.class_restrictions else "Any"),
+                    ("Bonuses", self.item_bonus_summary(detail_item)),
+                ],
+                columns=1,
+                column_width=520,
+                row_gap=10,
+                label_color=theme.TEXT_MUTED,
+                value_color=theme.TEXT_PRIMARY,
+                label_bold=True,
+                value_bold=False,
+                font_size=22,
+                line_spacing=2,
+            ).draw(
+                screen=screen,
+                font=self.font,
+                x=left_x,
+                y=top_y,
+            )
+        else:
+            TextBlock(
+                lines=left_lines,
+                color=theme.TEXT_SECONDARY,
+                row_spacing=24,
+            ).draw(screen, self.font, left_x, top_y, 520)
+
+        if self.selected_hero is not None:
+            hero = self.selected_hero
+            KeyValueGrid(
+                rows=[
+                    ("Hero", hero.name),
+                    ("Class", f"{hero.hero_class}"),
+                    ("Subclass", hero.subclass or "None"),
+                    ("Ability", hero.special_ability or "None"),
+                    ("Age", f"{hero.age} ({hero.career_stage()})"),
+                    ("Age Power", f"x{hero.age_power_multiplier():.2f}"),
+                    ("Level", hero.level),
+                    ("Power", hero.combat_power()),
+                    ("Mentor", hero.mentorship_value()),
+                    ("Stats", f"Might {hero.total_stat('might')} | Agility {hero.total_stat('agility')} | Mind {hero.total_stat('mind')} | Spirit {hero.total_stat('spirit')}"),
+                    ("Equipment", self.equipment_summary(hero)),
+                ],
+                columns=1,
+                column_width=1040,
+                row_gap=10,
+                label_color=theme.TEXT_MUTED,
+                value_color=theme.TEXT_PRIMARY,
+                label_bold=True,
+                value_bold=False,
+                font_size=22,
+                line_spacing=2,
+            ).draw(
+                screen=screen,
+                font=self.font,
+                x=right_x,
+                y=top_y,
+            )
+        else:
+            TextBlock(
+                lines=right_lines,
+                color=theme.TEXT_SECONDARY,
+                row_spacing=24,
+            ).draw(screen, self.font, right_x, top_y, 1040)
 
     def build_buttons(self):
         buttons = [
@@ -459,32 +541,3 @@ class InventoryScene(SceneBase):
             parts.append(f"-{int(value * 100)}% dmg from {enemy}")
 
         return "; ".join(parts) if parts else "No bonuses"
-
-    def item_detail_lines(self, item):
-        if item is None:
-            return ["Item: None selected"]
-
-        classes = ", ".join(item.class_restrictions) if item.class_restrictions else "Any"
-
-        return [
-            f"Item: {item.name}",
-            f"Slot: {item.slot}",
-            f"Rarity: {item.rarity}",
-            f"Value: {item.value}g",
-            f"Classes: {classes}",
-            f"Bonuses: {self.item_bonus_summary(item)}",
-        ]
-
-    def hero_detail_lines(self, hero):
-        if hero is None:
-            return ["Hero: None selected"]
-
-        return [
-            f"Hero: {hero.name}",
-            f"Class: {hero.hero_class}    Subclass: {hero.subclass or 'None'}",
-            f"Ability: {hero.special_ability or 'None'}",
-            f"Age: {hero.age}    Stage: {hero.career_stage()}    Age Power: x{hero.age_power_multiplier():.2f}",
-            f"Level: {hero.level}    Power: {hero.combat_power()}    Mentor: {hero.mentorship_value()}",
-            f"Stats: Might {hero.total_stat('might')}    Agility {hero.total_stat('agility')}    Mind {hero.total_stat('mind')}    Spirit {hero.total_stat('spirit')}",
-            truncate_text(f"Equipment: {self.equipment_summary(hero)}", self.font, 1000),
-        ]

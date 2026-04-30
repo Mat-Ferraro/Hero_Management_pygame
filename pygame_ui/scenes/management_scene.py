@@ -1,8 +1,12 @@
+import pygame
+
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
-from pygame_ui.ui_helpers import truncate_text
+from pygame_ui.ui_helpers import truncate_text, wrap_text
 from pygame_ui.widgets.header_panel import HeaderPanel
-from pygame_ui.widgets.navigation_buttons import action_button, hub_button
+from pygame_ui.widgets.inc_dec_control import IncDecControl
+from pygame_ui.widgets.label_value_text import LabelValueText
+from pygame_ui.widgets.panel import Panel
 from pygame_ui.widgets.resource_header import ResourceHeader
 from pygame_ui.widgets.selection_details_panel import SelectionDetailsPanel
 from pygame_ui.widgets.status_chip import StatusChip
@@ -10,8 +14,37 @@ from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 
+from systems.contract_lifecycle import ensure_contract_fields, is_expiring_hero
+from systems.contract_negotiation import (
+    clear_offer,
+    clear_renewal_offer,
+    default_offer_for_hero,
+    default_renewal_offer_for_hero,
+    ensure_contract_state,
+    estimate_player_offer_grade,
+    estimate_player_renewal_grade,
+    estimate_rival_grade_hint,
+    get_offer_for_hero,
+    get_renewal_offer_for_hero,
+    queue_offer,
+    queue_renewal_offer,
+    renewal_ask_for_hero,
+    renewal_risk_label,
+    resolve_contract_round,
+    rival_summary_for_hero,
+    visible_offer_modifiers,
+    visible_renewal_modifiers,
+)
+
+from ..widgets.button import Button
+
 
 class ManagementScene(SceneBase):
+    ASK_COLUMN_X = 748
+    PLAYER_GRADE_X = -238
+    RIVAL_GRADE_X = -154
+    QUEUE_CHIP_X = -70
+
     def __init__(self, state, on_return_to_hub, on_save_game):
         super().__init__()
 
@@ -19,22 +52,29 @@ class ManagementScene(SceneBase):
         self.on_return_to_hub = on_return_to_hub
         self.on_save_game = on_save_game
 
+        ensure_contract_state(self.state)
+
         self.selected_hero = None
         self.selected_source = ""
-        self.status_message = "Guild management active."
+        self.status_message = "Contract board active."
+
+        self.offer_campaigns = 1
+        self.offer_signing_fee = 25
 
         self.details_panel = SelectionDetailsPanel(
-            rect=(40, 790, 1840, 230),
-            title="Selected Hero Details",
+            rect=(40, 770, 1210, 230),
+            title="Contract Negotiation Details",
             empty_message="Select a recruit or roster hero to inspect.",
-            left_width=560,
-            right_width=1160,
+            left_width=360,
+            right_width=760,
         )
 
+        self.controls_panel_rect = (1270, 770, 610, 230)
+
         self.recruits_panel = ScrollableListPanel(
-            rect=(40, 150, 1080, 600),
+            rect=(40, 150, 1120, 600),
             title="Available Recruits",
-            row_height=74,
+            row_height=82,
             row_gap=10,
             visible_rows=None,
             font=self.font,
@@ -44,9 +84,9 @@ class ManagementScene(SceneBase):
         )
 
         self.roster_panel = ScrollableListPanel(
-            rect=(1160, 150, 720, 600),
+            rect=(1200, 150, 680, 600),
             title="Roster",
-            row_height=70,
+            row_height=72,
             row_gap=10,
             visible_rows=None,
             font=self.font,
@@ -55,12 +95,41 @@ class ManagementScene(SceneBase):
             title_height=64,
         )
 
+        self.campaign_control = IncDecControl(
+            rect=(1310, 845, 220, 72),
+            title="Campaigns",
+            value_getter=lambda: str(self.offer_campaigns),
+            on_decrease=self.decrease_campaigns,
+            on_increase=self.increase_campaigns,
+        )
+
+        self.signing_fee_control = IncDecControl(
+            rect=(1600, 845, 240, 72),
+            title="Signing Fee",
+            value_getter=lambda: f"{self.offer_signing_fee}g",
+            on_decrease=self.decrease_fee,
+            on_increase=self.increase_fee,
+        )
+
     def roster_capacity(self):
         return self.state.guild_upgrades.roster_capacity
 
     def sync_lists(self):
+        ensure_contract_state(self.state)
+
+        for hero in self.state.roster:
+            ensure_contract_fields(hero)
+
         self.recruits_panel.set_items(self.state.available_contracts)
         self.roster_panel.set_items(self.state.roster)
+
+        if self.selected_source == "Recruit" and self.selected_hero not in self.state.available_contracts:
+            self.selected_hero = None
+            self.selected_source = ""
+
+        if self.selected_source == "Roster" and self.selected_hero not in self.state.roster:
+            self.selected_hero = None
+            self.selected_source = ""
 
     def handle_event(self, event):
         self.sync_lists()
@@ -103,92 +172,153 @@ class ManagementScene(SceneBase):
             empty_text="No heroes hired yet.",
         )
 
+        self.draw_recruit_table_headers(screen)
         self.draw_details(screen)
+        self.draw_controls_panel(screen)
+
         self.update_and_draw_buttons(screen, self.build_all_buttons())
 
     def draw_header(self, screen):
         HeaderPanel(
-            rect=(40, 30, 1840, 96),
+            rect=(40, 30, 1840, 110),
             title="Guild Management",
             stats="",
             status_message=self.status_message,
-            stats_pos=(70, 70),
-            status_pos=(1080, 108),
+            stats_pos=(70, 82),
+            status_pos=(980, 122),
         ).draw(screen, self.title_font, self.header_font, self.font)
+
+        expiring = sum(1 for hero in self.state.roster if is_expiring_hero(hero))
+        renewals = len(getattr(self.state, "renewal_offers", []))
 
         ResourceHeader(
             resources=[
                 ("Gold", f"{self.state.gold}g"),
                 ("Roster", f"{len(self.state.roster)}/{self.roster_capacity()}"),
                 ("Recruits", len(self.state.available_contracts)),
-                ("Fallen", len(self.state.fallen_heroes)),
-                ("Inventory", len(self.state.inventory)),
+                ("Offers", len(getattr(self.state, "contract_offers", []))),
+                ("Renewals", renewals),
+                ("Expiring", expiring),
             ],
-            spacing=185,
-        ).draw(screen, self.font, 60, 72)
+            spacing=125,
+            item_max_width=150,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
+        ).draw(screen, self.font, 60, 82)
+
+    def draw_recruit_table_headers(self, screen):
+        panel_x = self.recruits_panel.rect.x
+        panel_y = self.recruits_panel.rect.y
+        panel_w = self.recruits_panel.rect.width
+
+        header_y = panel_y + 42
+
+        recruit_x = panel_x + 30
+        ask_x = panel_x + self.ASK_COLUMN_X + 28
+        your_x = panel_x + panel_w + self.PLAYER_GRADE_X - 36
+        rival_x = panel_x + panel_w + self.RIVAL_GRADE_X - 38
+        queue_x = panel_x + panel_w + self.QUEUE_CHIP_X - 14
+
+        screen.blit(
+            self.small_font.render("Recruit", True, theme.TEXT_MUTED),
+            (recruit_x, header_y),
+        )
+        screen.blit(
+            self.small_font.render("Ask", True, theme.TEXT_MUTED),
+            (ask_x, header_y),
+        )
+        screen.blit(
+            self.small_font.render("Your Offer", True, theme.TEXT_MUTED),
+            (your_x, header_y),
+        )
+        screen.blit(
+            self.small_font.render("Rival Offer", True, theme.TEXT_MUTED),
+            (rival_x, header_y),
+        )
+        screen.blit(
+            self.small_font.render("Q", True, theme.TEXT_MUTED),
+            (queue_x, header_y),
+        )
 
     def draw_recruit_row(self, screen, hero, row_rect, is_selected, is_hovered):
-        can_afford = self.state.gold >= hero.signing_bonus
-        roster_full = len(self.state.roster) >= self.roster_capacity()
-        can_recruit = can_afford and not roster_full
-
         draw_selectable_row(
             screen=screen,
             rect=row_rect,
             is_selected=is_selected,
             is_hovered=is_hovered,
-            style="dark" if can_recruit else "brown",
+            style="dark",
         )
 
-        subclass = hero.subclass or "Base"
+        offer = get_offer_for_hero(self.state, hero)
+        queued = offer is not None
 
+        if offer is None:
+            campaigns = hero.preferred_campaigns
+            signing_fee = hero.asking_signing_fee
+            your_offer_grade = "N/A"
+        else:
+            campaigns = int(offer["offered_campaigns"])
+            signing_fee = int(offer["offered_signing_fee"])
+            your_offer_grade = estimate_player_offer_grade(self.state, hero, campaigns, signing_fee)
+
+        rival_hint = estimate_rival_grade_hint(self.state, hero)
+
+        subclass = hero.subclass or "Base"
+        top_line = f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level} | Age {hero.age}"
         screen.blit(
             self.font.render(
-                truncate_text(
-                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
-                    self.font,
-                    row_rect.width - 250,
-                ),
+                truncate_text(top_line, self.font, row_rect.width - 420),
                 True,
                 theme.TEXT_PRIMARY,
             ),
             (row_rect.x + 14, row_rect.y + 10),
         )
 
-        StatusChip(
-            rect=(row_rect.right - 234, row_rect.y + 10, 104, 26),
-            text=f"{hero.signing_bonus}g",
-            style="good" if can_afford else "danger",
-        ).draw(screen, self.small_font)
+        ask_text = f"{hero.asking_signing_fee}g / {hero.preferred_campaigns}c"
+        screen.blit(
+            self.small_font.render(ask_text, True, theme.TEXT_SECONDARY),
+            (row_rect.x + self.ASK_COLUMN_X, row_rect.y + 14),
+        )
+
+        self.draw_grade_chip(
+            screen,
+            rect=(row_rect.right + self.PLAYER_GRADE_X, row_rect.y + 10, 72, 24),
+            grade_text=your_offer_grade,
+        )
+        self.draw_grade_chip(
+            screen,
+            rect=(row_rect.right + self.RIVAL_GRADE_X, row_rect.y + 10, 72, 24),
+            grade_text=rival_hint,
+        )
 
         StatusChip(
-            rect=(row_rect.right - 118, row_rect.y + 10, 104, 26),
-            text="Open" if not roster_full else "Full",
-            style="good" if not roster_full else "danger",
+            rect=(row_rect.right + self.QUEUE_CHIP_X, row_rect.y + 10, 56, 24),
+            text="Q" if queued else "-",
+            style="good" if queued else "default",
         ).draw(screen, self.small_font)
 
-        TextBlock(
-            lines=[
-                (
-                    f"Age {hero.age} ({hero.career_stage()}) | "
-                    f"Pwr {hero.combat_power()} | Wage {hero.wage_per_year}g | "
-                    f"{hero.growth_rate} | {hero.contract_attitude}"
-                )
-            ],
-            color=theme.TEXT_MUTED,
-            row_spacing=18,
-            max_lines=1,
-        ).draw(
-            screen=screen,
-            font=self.small_font,
-            x=row_rect.x + 14,
-            y=row_rect.y + 44,
-            max_width=row_rect.width - 28,
+        mods = visible_offer_modifiers(self.state, hero, campaigns, signing_fee)
+        bottom_line = (
+            f"Offer {signing_fee}g / {campaigns}c | "
+            f"{mods[0]} | {mods[1] if len(mods) > 1 else ''}"
+        )
+        screen.blit(
+            self.small_font.render(
+                truncate_text(bottom_line, self.small_font, row_rect.width - 32),
+                True,
+                theme.TEXT_MUTED,
+            ),
+            (row_rect.x + 14, row_rect.y + 50),
         )
 
     def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
-        style = "green"
-        if hero.injured_years_remaining > 0:
+        ensure_contract_fields(hero)
+
+        style = "green" if hero.injured_years_remaining <= 0 else "brown"
+        if is_expiring_hero(hero):
             style = "brown"
 
         draw_selectable_row(
@@ -206,7 +336,7 @@ class ManagementScene(SceneBase):
                 truncate_text(
                     f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
                     self.font,
-                    row_rect.width - 140,
+                    row_rect.width - 170,
                 ),
                 True,
                 (210, 240, 210),
@@ -214,30 +344,44 @@ class ManagementScene(SceneBase):
             (row_rect.x + 14, row_rect.y + 10),
         )
 
+        chip_text = f"{hero.contract_years}c left"
+        chip_style = "danger" if hero.contract_years <= 1 else "info"
+
         StatusChip(
-            rect=(row_rect.right - 118, row_rect.y + 10, 104, 26),
-            text=self.satisfaction_label(hero),
-            style=self.satisfaction_style(hero),
+            rect=(row_rect.right - 122, row_rect.y + 10, 106, 24),
+            text=chip_text,
+            style=chip_style,
         ).draw(screen, self.small_font)
 
-        TextBlock(
-            lines=[
-                (
-                    f"Age {hero.age} ({hero.career_stage()}) | "
-                    f"Pwr {hero.combat_power()} | Wage {hero.wage_per_year}g | "
-                    f"{self.health_text(hero)}"
-                )
-            ],
-            color=(180, 210, 180),
-            row_spacing=18,
-            max_lines=1,
-        ).draw(
-            screen=screen,
-            font=self.small_font,
-            x=row_rect.x + 14,
-            y=row_rect.y + 44,
-            max_width=row_rect.width - 28,
+        if is_expiring_hero(hero):
+            bottom_line = (
+                f"Age {hero.age} ({hero.career_stage()}) | "
+                f"Pwr {hero.combat_power()} | Renewal due"
+            )
+        else:
+            bottom_line = (
+                f"Age {hero.age} ({hero.career_stage()}) | "
+                f"Pwr {hero.combat_power()} | "
+                f"Mentor {hero.mentorship_value()} | "
+                f"Satisfaction {hero.satisfaction_label()}"
+            )
+
+        screen.blit(
+            self.small_font.render(
+                truncate_text(bottom_line, self.small_font, row_rect.width - 28),
+                True,
+                (180, 210, 180),
+            ),
+            (row_rect.x + 14, row_rect.y + 46),
         )
+
+    def draw_grade_chip(self, screen, rect, grade_text):
+        if grade_text == "N/A":
+            StatusChip(rect=rect, text="N/A", style="default").draw(screen, self.small_font)
+            return
+
+        style = self.grade_style_for_hint(grade_text)
+        StatusChip(rect=rect, text=grade_text, style=style).draw(screen, self.small_font)
 
     def draw_details(self, screen):
         if not self.selected_hero:
@@ -252,60 +396,262 @@ class ManagementScene(SceneBase):
 
         hero = self.selected_hero
 
+        if self.selected_source == "Recruit":
+            self.draw_recruit_details(screen, hero)
+        else:
+            self.draw_roster_details(screen, hero)
+
+    def draw_recruit_details(self, screen, hero):
         self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
-        columns = [
-            [
-                f"Name: {hero.name}",
-                f"Source: {self.selected_source}",
-                f"Class: {hero.hero_class}",
-                f"Subclass: {hero.subclass or 'None'}",
-                f"Specialty: {hero.specialty}",
-                f"Ability: {hero.special_ability or 'None'}",
-            ],
-            [
-                f"Growth: {hero.growth_rate}",
-                f"Attitude: {hero.contract_attitude}",
-                f"Satisfaction: {hero.satisfaction}/100",
-                f"Contract Years: {hero.contract_years}",
-                f"Recruit Cost: {hero.signing_bonus}g",
-                f"Dispatch Wage: {hero.wage_per_year}g",
-            ],
-            [
-                f"Power: {hero.combat_power()}",
-                f"Age: {hero.age} ({hero.career_stage()})",
-                f"Age Power: x{hero.age_power_multiplier():.2f}",
-                f"Mentorship: {hero.mentorship_value()}",
-                f"Retire Risk: {hero.retirement_chance() * 100:.1f}%",
-                f"Health: {self.health_text(hero)}",
-            ],
+        left_x = self.details_panel.rect.x + 22
+        middle_x = self.details_panel.rect.x + 320
+        right_x = self.details_panel.rect.x + 730
+        top_y = self.details_panel.rect.y + 42
+
+        your_grade = estimate_player_offer_grade(
+            self.state,
+            hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+        rival_hint = estimate_rival_grade_hint(self.state, hero)
+        modifiers = visible_offer_modifiers(
+            self.state,
+            hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+        rival_summary = rival_summary_for_hero(self.state, hero)
+
+        left_entries = [
+            ("Recruit", hero.name),
+            ("Class", hero.hero_class),
+            ("Subclass", hero.subclass or "None"),
+            ("Specialty", hero.specialty),
+            ("Growth", hero.growth_rate),
+            ("Attitude", hero.contract_attitude),
         ]
 
-        start_x = self.details_panel.rect.x + 28
-        start_y = self.details_panel.rect.y + 54
-        column_width = 590
+        middle_entries = [
+            ("Asking Price", f"{hero.asking_signing_fee}g"),
+            ("Preferred Campaigns", hero.preferred_campaigns),
+            ("Ask / Campaign", f"{hero.asking_fee_per_campaign}g"),
+            ("Draft Offer", f"{self.offer_signing_fee}g / {self.offer_campaigns}c"),
+            ("Your Offer Grade", your_grade),
+            ("Rival Offer Grade", rival_hint),
+        ]
 
-        for column_index, lines in enumerate(columns):
-            x = start_x + column_index * column_width
-            y = start_y
+        right_entries = [
+            ("Likely Rival", rival_summary["name"]),
+            ("Rival Style", rival_summary["style"]),
+            ("Rival Tagline", rival_summary["tagline"] or "No tagline"),
+            ("Why They Care", rival_summary["reason"]),
+            ("Modifiers", ", ".join(modifiers) if modifiers else "No major visible modifiers"),
+            ("Notes", "Money per campaign drives most of the decision."),
+        ]
 
-            for line in lines:
+        self.draw_text_column(screen, left_entries, left_x, top_y, 260)
+        self.draw_text_column(screen, middle_entries, middle_x, top_y, 360)
+        self.draw_text_column(screen, right_entries, right_x, top_y, 430)
+
+    def draw_roster_details(self, screen, hero):
+        ensure_contract_fields(hero)
+
+        if is_expiring_hero(hero):
+            self.draw_roster_renewal_details(screen, hero)
+            return
+
+        left_lines = [
+            f"Hero: {hero.name}",
+            f"Class: {hero.hero_class}",
+            f"Subclass: {hero.subclass or 'None'}",
+            f"Ability: {hero.special_ability or 'None'}",
+            f"Specialty: {hero.specialty}",
+            f"Growth: {hero.growth_rate}",
+        ]
+
+        right_lines = [
+            f"Power: {hero.combat_power()}",
+            f"Age: {hero.age} ({hero.career_stage()})",
+            f"Mentorship: {hero.mentorship_value()}",
+            f"Satisfaction: {hero.satisfaction}/100 ({hero.satisfaction_label()})",
+            f"Retire Risk: {hero.retirement_chance() * 100:.1f}%",
+            f"Contract Remaining: {hero.contract_years} campaign(s)",
+        ]
+
+        self.details_panel.draw(
+            screen=screen,
+            title_font=self.title_font,
+            font=self.font,
+            left_lines=left_lines,
+            right_lines=right_lines,
+        )
+
+    def draw_roster_renewal_details(self, screen, hero):
+        self.details_panel.details_panel.panel.draw(screen, self.title_font)
+
+        left_x = self.details_panel.rect.x + 22
+        middle_x = self.details_panel.rect.x + 320
+        right_x = self.details_panel.rect.x + 730
+        top_y = self.details_panel.rect.y + 42
+
+        ask_campaigns, ask_fee = renewal_ask_for_hero(self.state, hero)
+        renewal_grade = estimate_player_renewal_grade(
+            self.state,
+            hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+        modifiers = visible_renewal_modifiers(
+            self.state,
+            hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+        risk_label = renewal_risk_label(
+            self.state,
+            hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+
+        left_entries = [
+            ("Hero", hero.name),
+            ("Renewal State", "Expiring"),
+            ("Class", hero.hero_class),
+            ("Subclass", hero.subclass or "None"),
+            ("Satisfaction", f"{hero.satisfaction}/100 ({hero.satisfaction_label()})"),
+            ("Mentorship", hero.mentorship_value()),
+        ]
+
+        middle_entries = [
+            ("Renewal Ask", f"{ask_fee}g / {ask_campaigns}c"),
+            ("Draft Renewal", f"{self.offer_signing_fee}g / {self.offer_campaigns}c"),
+            ("Renewal Grade", renewal_grade),
+            ("Renewal Risk", risk_label),
+            ("Age", f"{hero.age} ({hero.career_stage()})"),
+            ("Contract Remaining", f"{hero.contract_years} campaign(s)"),
+        ]
+
+        right_entries = [
+            ("Modifiers", ", ".join(modifiers) if modifiers else "No major visible modifiers"),
+            ("Queue Rules", "Queued renewals resolve when the current contract expires."),
+            ("Failure Result", "No accepted renewal means the hero returns to the recruit market."),
+        ]
+
+        self.draw_text_column(screen, left_entries, left_x, top_y, 260)
+        self.draw_text_column(screen, middle_entries, middle_x, top_y, 360)
+        self.draw_text_column(screen, right_entries, right_x, top_y, 430)
+
+    def draw_text_column(self, screen, entries, x, y, max_width):
+        current_y = y
+        row_gap = 10
+
+        for entry in entries:
+            if isinstance(entry, tuple) and len(entry) == 2:
+                label, value = entry
+                used_height = LabelValueText(
+                    label=label,
+                    value=value,
+                    label_color=theme.TEXT_SECONDARY,
+                    value_color=theme.TEXT_PRIMARY,
+                    label_bold=True,
+                    value_bold=False,
+                    font_size=22,
+                    line_spacing=2,
+                    wrap_value=True,
+                ).draw(
+                    screen=screen,
+                    font=self.font,
+                    x=x,
+                    y=current_y,
+                    max_width=max_width,
+                )
+                current_y += used_height + row_gap
+                continue
+
+            wrapped = wrap_text(str(entry), self.font, max_width)
+            for line in wrapped:
                 screen.blit(
                     self.font.render(line, True, theme.TEXT_SECONDARY),
-                    (x, y),
+                    (x, current_y),
                 )
-                y += 28
+                current_y += self.font.get_height() + 2
+
+            current_y += row_gap
+
+    def draw_controls_panel(self, screen):
+        title = "Offer Controls" if self.selected_source == "Recruit" else "Actions"
+        if self.selected_source == "Roster" and self.selected_hero is not None and is_expiring_hero(self.selected_hero):
+            title = "Renewal Controls"
+
+        Panel(self.controls_panel_rect, title).draw(screen, self.title_font)
+
+        if self.selected_source == "Recruit" and self.selected_hero is not None:
+            hint = self.small_font.render(
+                "Adjust terms, then queue the offer for this round.",
+                True,
+                theme.TEXT_MUTED,
+            )
+            screen.blit(hint, (1295, 812))
+            self.campaign_control.draw(screen, self.small_font, self.font)
+            self.signing_fee_control.draw(screen, self.small_font, self.font)
+
+        elif self.selected_source == "Roster" and self.selected_hero is not None and is_expiring_hero(self.selected_hero):
+            hint = self.small_font.render(
+                "Adjust renewal terms before the contract expires.",
+                True,
+                theme.TEXT_MUTED,
+            )
+            screen.blit(hint, (1295, 812))
+            self.campaign_control.draw(screen, self.small_font, self.font)
+            self.signing_fee_control.draw(screen, self.small_font, self.font)
+
+        elif self.selected_source == "Roster" and self.selected_hero is not None:
+            hint = self.small_font.render(
+                "Roster actions for the selected hero.",
+                True,
+                theme.TEXT_MUTED,
+            )
+            screen.blit(hint, (1295, 850))
+
+        else:
+            hint = self.small_font.render(
+                "Select a recruit or expiring hero to edit terms.",
+                True,
+                theme.TEXT_MUTED,
+            )
+            screen.blit(hint, (1295, 850))
 
     def build_all_buttons(self):
         buttons = [
-            hub_button(self.on_return_to_hub),
+            Button((1680, 72, 140, 36), "Hub", self.on_return_to_hub),
+            Button((1490, 72, 170, 36), "Resolve Round", self.resolve_offers),
         ]
 
-        if self.selected_hero and self.selected_source == "Recruit":
-            buttons.append(action_button("Recruit Hero", self.hire_selected_hero, rect=(1440, 956, 180, 44)))
+        if self.selected_source == "Recruit" and self.selected_hero is not None:
+            buttons.extend(self.campaign_control.get_buttons())
+            buttons.extend(self.signing_fee_control.get_buttons())
+            buttons.extend(
+                [
+                    Button((1360, 930, 130, 42), "Queue", self.queue_selected_offer),
+                    Button((1510, 930, 130, 42), "Clear", self.clear_selected_offer),
+                ]
+            )
 
-        if self.selected_hero and self.selected_source == "Roster":
-            buttons.append(action_button("Release Hero", self.release_selected_hero, rect=(1660, 956, 180, 44)))
+        if self.selected_source == "Roster" and self.selected_hero is not None and is_expiring_hero(self.selected_hero):
+            buttons.extend(self.campaign_control.get_buttons())
+            buttons.extend(self.signing_fee_control.get_buttons())
+            buttons.extend(
+                [
+                    Button((1360, 930, 150, 42), "Queue Renewal", self.queue_selected_renewal),
+                    Button((1530, 930, 150, 42), "Clear Renewal", self.clear_selected_renewal),
+                ]
+            )
+
+        elif self.selected_source == "Roster" and self.selected_hero is not None:
+            buttons.append(Button((1665, 930, 170, 42), "Release Hero", self.release_selected_hero))
 
         return buttons
 
@@ -314,6 +660,7 @@ class ManagementScene(SceneBase):
         if recruit is not None:
             self.selected_hero = recruit
             self.selected_source = "Recruit"
+            self.load_offer_editor_for_selected()
             self.status_message = f"Selected recruit: {recruit.name}"
             return
 
@@ -321,75 +668,148 @@ class ManagementScene(SceneBase):
         if roster_hero is not None:
             self.selected_hero = roster_hero
             self.selected_source = "Roster"
+            self.load_offer_editor_for_selected()
             self.status_message = f"Selected roster hero: {roster_hero.name}"
 
-    def hire_hero(self, hero):
-        if hero not in self.state.available_contracts:
+    def load_offer_editor_for_selected(self):
+        if self.selected_hero is None:
             return
 
-        if len(self.state.roster) >= self.roster_capacity():
-            self.status_message = (
-                f"Roster is full ({len(self.state.roster)}/{self.roster_capacity()}). "
-                "Upgrade lodging to recruit more heroes."
-            )
+        if self.selected_source == "Recruit":
+            offer = get_offer_for_hero(self.state, self.selected_hero)
+            if offer is None:
+                offer = default_offer_for_hero(self.selected_hero)
+
+            self.offer_campaigns = int(offer["offered_campaigns"])
+            self.offer_signing_fee = int(offer["offered_signing_fee"])
             return
 
-        if self.state.gold < hero.signing_bonus:
-            self.status_message = f"Not enough gold to recruit {hero.name}."
+        if self.selected_source == "Roster" and is_expiring_hero(self.selected_hero):
+            offer = get_renewal_offer_for_hero(self.state, self.selected_hero)
+            if offer is None:
+                offer = default_renewal_offer_for_hero(self.state, self.selected_hero)
+
+            self.offer_campaigns = int(offer["offered_campaigns"])
+            self.offer_signing_fee = int(offer["offered_signing_fee"])
+
+    def decrease_campaigns(self):
+        self.offer_campaigns = max(1, self.offer_campaigns - 1)
+
+    def increase_campaigns(self):
+        self.offer_campaigns += 1
+
+    def decrease_fee(self):
+        self.offer_signing_fee = max(25, self.offer_signing_fee - 25)
+
+    def increase_fee(self):
+        self.offer_signing_fee += 25
+
+    def queue_selected_offer(self):
+        if self.selected_hero is None or self.selected_source != "Recruit":
+            self.status_message = "Select a recruit first."
             return
 
-        self.state.gold -= hero.signing_bonus
-        self.state.roster.append(hero)
-        self.state.available_contracts.remove(hero)
-
-        self.selected_hero = hero
-        self.selected_source = "Roster"
-        self.status_message = f"Recruited {hero.name} for {hero.signing_bonus}g."
-
-        self.sync_lists()
+        queue_offer(
+            self.state,
+            self.selected_hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
 
         if self.on_save_game:
             self.on_save_game()
 
-    def hire_selected_hero(self):
-        if self.selected_hero is not None and self.selected_source == "Recruit":
-            self.hire_hero(self.selected_hero)
+        self.status_message = (
+            f"Queued offer for {self.selected_hero.name}: "
+            f"{self.offer_signing_fee}g / {self.offer_campaigns}c."
+        )
 
-    def release_hero(self, hero):
-        if hero not in self.state.roster:
+    def clear_selected_offer(self):
+        if self.selected_hero is None or self.selected_source != "Recruit":
+            self.status_message = "Select a recruit first."
             return
 
-        self.state.roster.remove(hero)
+        clear_offer(self.state, self.selected_hero)
+        self.load_offer_editor_for_selected()
 
-        if self.selected_hero is hero:
+        if self.on_save_game:
+            self.on_save_game()
+
+        self.status_message = f"Cleared offer for {self.selected_hero.name}."
+
+    def queue_selected_renewal(self):
+        if self.selected_hero is None or self.selected_source != "Roster" or not is_expiring_hero(self.selected_hero):
+            self.status_message = "Select an expiring hero first."
+            return
+
+        queue_renewal_offer(
+            self.state,
+            self.selected_hero,
+            self.offer_campaigns,
+            self.offer_signing_fee,
+        )
+
+        if self.on_save_game:
+            self.on_save_game()
+
+        self.status_message = (
+            f"Queued renewal for {self.selected_hero.name}: "
+            f"{self.offer_signing_fee}g / {self.offer_campaigns}c."
+        )
+
+    def clear_selected_renewal(self):
+        if self.selected_hero is None or self.selected_source != "Roster" or not is_expiring_hero(self.selected_hero):
+            self.status_message = "Select an expiring hero first."
+            return
+
+        clear_renewal_offer(self.state, self.selected_hero)
+        self.load_offer_editor_for_selected()
+
+        if self.on_save_game:
+            self.on_save_game()
+
+        self.status_message = f"Cleared renewal for {self.selected_hero.name}."
+
+    def resolve_offers(self):
+        messages = resolve_contract_round(self.state)
+
+        self.sync_lists()
+        self.selected_hero = None
+        self.selected_source = ""
+
+        if self.on_save_game:
+            self.on_save_game()
+
+        self.status_message = messages[-1] if messages else "Contract round resolved."
+
+    def release_selected_hero(self):
+        hero = self.selected_hero
+        if hero is None or self.selected_source != "Roster":
+            return
+
+        if hero in self.state.roster:
+            self.state.roster.remove(hero)
+            self.status_message = f"Released {hero.name} from the guild."
             self.selected_hero = None
             self.selected_source = ""
 
-        self.status_message = f"Released {hero.name} from the guild."
-        self.sync_lists()
+            if self.on_save_game:
+                self.on_save_game()
 
-        if self.on_save_game:
-            self.on_save_game()
+    def grade_style_for_hint(self, grade_text: str) -> str:
+        if grade_text.startswith("A"):
+            return "good"
+        if grade_text.startswith("B"):
+            return "info"
+        if grade_text.startswith("C"):
+            return "warning"
+        if grade_text.startswith("D") or grade_text.startswith("F"):
+            return "danger"
+        return "default"
 
-    def release_selected_hero(self):
-        if self.selected_hero is not None and self.selected_source == "Roster":
-            self.release_hero(self.selected_hero)
-
-    def satisfaction_label(self, hero):
-        if hero.satisfaction >= 75:
-            return "Happy"
-        if hero.satisfaction >= 45:
-            return "Okay"
-        return "Unhappy"
-
-    def satisfaction_style(self, hero):
+    def satisfaction_style(self, hero) -> str:
         if hero.satisfaction >= 75:
             return "good"
         if hero.satisfaction >= 45:
             return "warning"
         return "danger"
-
-    def health_text(self, hero):
-        if hero.injured_years_remaining > 0:
-            return f"Injured {hero.injured_years_remaining}y"
-        return hero.health_status()
