@@ -5,6 +5,7 @@ from typing import Dict
 from game_state import BereavementPayment, GameState
 from manager_reputation import ManagerReputation
 from models import Dungeon, Hero, Item
+from systems.campaign.campaign_models import CampaignRuntime
 from systems.guild_upgrades import guild_upgrades_from_dict, guild_upgrades_to_dict
 from systems.rival_guilds import ensure_rival_guild_state
 
@@ -84,7 +85,10 @@ def hero_from_dict(data: Dict) -> Hero:
         specialty=data.get("specialty", "Adventurer"),
         growth_rate=data.get("growth_rate", "Talented"),
         contract_attitude=data.get("contract_attitude", "Practical"),
-        equipment={slot: item_from_dict(item_data) for slot, item_data in data.get("equipment", {}).items()},
+        equipment={
+            slot: item_from_dict(item_data)
+            for slot, item_data in data.get("equipment", {}).items()
+        },
         injured_years_remaining=int(data.get("injured_years_remaining", 0)),
         wound_history=list(data.get("wound_history", [])),
         current_health=data.get("current_health"),
@@ -226,11 +230,23 @@ def contract_offer_from_dict(data: Dict) -> Dict:
     }
 
 
+def campaign_runtime_to_dict(runtime: CampaignRuntime | None):
+    if runtime is None:
+        return None
+    return runtime.to_dict()
+
+
+def campaign_runtime_from_dict(data):
+    if not data:
+        return None
+    return CampaignRuntime.from_dict(data)
+
+
 def game_state_to_dict(state: GameState) -> Dict:
     ensure_rival_guild_state(state)
 
     return {
-        "version": 8,
+        "version": 9,
         "expedition": state.expedition,
         "year": state.year,
         "gold": state.gold,
@@ -250,6 +266,7 @@ def game_state_to_dict(state: GameState) -> Dict:
         "renewal_offers": [contract_offer_to_dict(offer) for offer in state.renewal_offers],
         "contract_round": int(state.contract_round),
         "market_history": list(state.market_history),
+        "campaign_runtime": campaign_runtime_to_dict(getattr(state, "campaign_runtime", None)),
     }
 
 
@@ -277,6 +294,7 @@ def game_state_from_dict(data: Dict) -> GameState:
         renewal_offers=[contract_offer_from_dict(offer_data) for offer_data in data.get("renewal_offers", [])],
         contract_round=int(data.get("contract_round", 1)),
         market_history=list(data.get("market_history", [])),
+        campaign_runtime=campaign_runtime_from_dict(data.get("campaign_runtime")),
     )
 
     ensure_rival_guild_state(state)

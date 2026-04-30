@@ -1,3 +1,4 @@
+from game_state import campaign_is_active
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.widgets.card import Card
@@ -19,6 +20,7 @@ class GameHubScene(SceneBase):
         state,
         on_open_guild,
         on_open_expedition,
+        on_open_campaign,
         on_open_inventory,
         on_open_market,
         on_open_training,
@@ -33,6 +35,7 @@ class GameHubScene(SceneBase):
         self.state = state
         self.on_open_guild = on_open_guild
         self.on_open_expedition = on_open_expedition
+        self.on_open_campaign = on_open_campaign
         self.on_open_inventory = on_open_inventory
         self.on_open_market = on_open_market
         self.on_open_training = on_open_training
@@ -82,7 +85,7 @@ class GameHubScene(SceneBase):
             ],
             spacing=185,
             item_max_width=170,
-            font_size=30,
+            font_size=26,
             label_color=theme.TEXT_MUTED,
             value_color=theme.TEXT_PRIMARY,
             label_bold=False,
@@ -225,7 +228,7 @@ class GameHubScene(SceneBase):
         TextBlock(
             lines=[
                 "Expeditions are the primary source of gold, XP, and risk.",
-                "Stronger missions require larger parties and better preparation.",
+                "Campaign dispatch will become the real-time map layer.",
                 "Deaths and injuries can permanently affect your guild’s future.",
                 "Rival guilds now maintain their own tracked rosters and market pickups.",
             ],
@@ -239,9 +242,11 @@ class GameHubScene(SceneBase):
             max_width=540,
         )
 
+        campaign_style = "good" if campaign_is_active(self.state) else "warning"
+
         StatusChip((1306, 430, 140, 28), "Expeditions", "warning").draw(screen, self.small_font)
         StatusChip((1456, 430, 120, 28), "Rivals", "info").draw(screen, self.small_font)
-        StatusChip((1586, 430, 120, 28), "Menu", "default").draw(screen, self.small_font)
+        StatusChip((1586, 430, 140, 28), "Campaign", campaign_style).draw(screen, self.small_font)
 
     def draw_footer_summary(self, screen):
         footer_rect = (40, 720, 1840, 300)
@@ -256,6 +261,9 @@ class GameHubScene(SceneBase):
 
         upgrades = self.state.guild_upgrades
         rival_count = len(getattr(self.state, "rival_guilds", []))
+        campaign_runtime = getattr(self.state, "campaign_runtime", None)
+        campaign_status = "Active" if campaign_is_active(self.state) else "Inactive"
+        campaign_time = f"{campaign_runtime.elapsed_time:.1f}" if campaign_runtime is not None else "0.0"
 
         left_pairs = [
             ("Gold Available", f"{self.state.gold}g"),
@@ -267,7 +275,7 @@ class GameHubScene(SceneBase):
         middle_pairs = [
             ("Unlocked Classes", ", ".join(upgrades.unlocked_classes)),
             ("Training Hall Level", upgrades.training_hall_level),
-            ("Market", "Locked" if not upgrades.market_unlocked else "Unlocked"),
+            ("Market", "Unlocked" if upgrades.market_unlocked else "Locked"),
             ("Crown Stipend", f"{upgrades.crown_stipend}g"),
         ]
 
@@ -276,6 +284,8 @@ class GameHubScene(SceneBase):
             ("Completed Expeditions", self.state.expedition - 1),
             ("Mission Difficulty Cap", upgrades.mission_difficulty_cap),
             ("Tracked Rival Guilds", rival_count),
+            ("Campaign Runtime", campaign_status),
+            ("Campaign Time", campaign_time),
         ]
 
         self.draw_label_value_column(screen, left_pairs, 66, 778, 480)
@@ -305,6 +315,8 @@ class GameHubScene(SceneBase):
             current_y += row_spacing
 
     def build_buttons(self):
+        campaign_label = "Campaign" if not campaign_is_active(self.state) else "Resume Campaign"
+
         return [
             Button((90, 520, 220, 56), "Guild", self.on_open_guild),
             Button((330, 520, 220, 56), "Inventory", self.on_open_inventory),
@@ -313,8 +325,9 @@ class GameHubScene(SceneBase):
             Button((930, 500, 220, 56), "Upgrades", self.on_open_upgrades),
             Button((810, 570, 220, 56), "Training", self.on_open_training),
 
-            Button((1330, 500, 220, 56), "Expedition", self.on_open_expedition),
-            Button((1570, 500, 220, 56), "Rivals", self.on_open_rivals),
+            Button((1290, 500, 220, 56), campaign_label, self.on_open_campaign),
+            Button((1530, 500, 220, 56), "Expedition", self.on_open_expedition),
+            Button((1410, 570, 220, 56), "Rivals", self.on_open_rivals),
 
             main_menu_button(self.on_return_to_menu, rect=(1650, 930, 180, 52)),
         ]

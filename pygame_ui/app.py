@@ -1,10 +1,11 @@
 import pygame
 
-from game_state import create_game
+from game_state import campaign_is_active, create_game, start_campaign_runtime
 from save_system import load_game, save_exists, save_game
 from systems.rival_guilds import ensure_rival_guild_state
 
 from pygame_ui.dev_console import DevConsole
+from pygame_ui.scenes.campaign_map_scene import CampaignMapScene
 from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
 from pygame_ui.scenes.expedition_scene import ExpeditionScene
 from pygame_ui.scenes.game_hub_scene import GameHubScene
@@ -68,6 +69,7 @@ class App:
             state=self.state,
             on_open_guild=self.show_guild,
             on_open_expedition=self.show_expedition,
+            on_open_campaign=self.show_campaign,
             on_open_inventory=self.show_inventory,
             on_open_market=self.show_market,
             on_open_training=self.show_training,
@@ -97,6 +99,20 @@ class App:
             state=self.state,
             party=party,
             dungeon=dungeon,
+            on_return_to_hub=self.show_game_hub,
+            on_save_game=self.save_current_game,
+        )
+
+    def show_campaign(self):
+        if self.state is None:
+            return
+
+        if not campaign_is_active(self.state):
+            start_campaign_runtime(self.state)
+            self.save_current_game()
+
+        self.scene = CampaignMapScene(
+            state=self.state,
             on_return_to_hub=self.show_game_hub,
             on_save_game=self.save_current_game,
         )

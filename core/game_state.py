@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from data_loader import load_dungeons, load_items
 from hero_generator import generate_contract_market
 from manager_reputation import ManagerReputation
 from models import Dungeon, Hero, Item
+from systems.campaign.campaign_runtime import create_campaign_runtime
+from systems.campaign.campaign_models import CampaignRuntime
 from systems.guild_upgrades import GuildUpgrades
 from systems.rival_guilds import ensure_rival_guild_state
 
@@ -34,6 +36,7 @@ class GameState:
     renewal_offers: List[Dict] = field(default_factory=list)
     contract_round: int = 1
     market_history: List[str] = field(default_factory=list)
+    campaign_runtime: Optional[CampaignRuntime] = None
 
 
 def create_dungeons() -> List[Dungeon]:
@@ -56,6 +59,20 @@ def refresh_contract_market(state: GameState) -> None:
     state.available_contracts = generate_contract_market(state)
 
 
+def campaign_is_active(state: GameState) -> bool:
+    runtime = getattr(state, "campaign_runtime", None)
+    return runtime is not None and bool(getattr(runtime, "active", False))
+
+
+def start_campaign_runtime(state: GameState, max_spawns: int = 18):
+    state.campaign_runtime = create_campaign_runtime(max_spawns=max_spawns)
+    return state.campaign_runtime
+
+
+def clear_campaign_runtime(state: GameState) -> None:
+    state.campaign_runtime = None
+
+
 def create_game() -> GameState:
     state = GameState(
         expedition=1,
@@ -69,6 +86,7 @@ def create_game() -> GameState:
         renewal_offers=[],
         contract_round=1,
         market_history=[],
+        campaign_runtime=None,
     )
     refresh_contract_market(state)
     ensure_rival_guild_state(state)
