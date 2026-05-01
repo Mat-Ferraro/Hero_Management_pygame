@@ -54,6 +54,7 @@ class CampaignTask:
     task_duration: float
     recommended_power: int
     required_stats: Dict[str, int] = field(default_factory=dict)
+    stat_rules: Dict[str, Dict] = field(default_factory=dict)
     max_heroes: int = 1
     preferred_classes: List[str] = field(default_factory=list)
     assigned_heroes: List[str] = field(default_factory=list)
@@ -74,6 +75,10 @@ class CampaignTask:
     payout_multiplier: float = 1.0
     xp_multiplier: float = 1.0
     outcome_summary: str = ""
+    injured_heroes: List[str] = field(default_factory=list)
+    injury_rest_by_hero: Dict[str, float] = field(default_factory=dict)
+    satisfaction_delta_by_hero: Dict[str, int] = field(default_factory=dict)
+    consequence_summary: List[str] = field(default_factory=list)
 
     def is_terminal(self) -> bool:
         return self.state in {"completed", "failed", "expired"}
@@ -90,6 +95,7 @@ class CampaignTask:
             "task_duration": self.task_duration,
             "recommended_power": self.recommended_power,
             "required_stats": dict(self.required_stats),
+            "stat_rules": dict(self.stat_rules),
             "max_heroes": self.max_heroes,
             "preferred_classes": list(self.preferred_classes),
             "assigned_heroes": list(self.assigned_heroes),
@@ -110,6 +116,10 @@ class CampaignTask:
             "payout_multiplier": self.payout_multiplier,
             "xp_multiplier": self.xp_multiplier,
             "outcome_summary": self.outcome_summary,
+            "injured_heroes": list(self.injured_heroes),
+            "injury_rest_by_hero": dict(self.injury_rest_by_hero),
+            "satisfaction_delta_by_hero": dict(self.satisfaction_delta_by_hero),
+            "consequence_summary": list(self.consequence_summary),
         }
 
     @classmethod
@@ -125,6 +135,7 @@ class CampaignTask:
             task_duration=float(data["task_duration"]),
             recommended_power=int(data["recommended_power"]),
             required_stats=dict(data.get("required_stats", {})),
+            stat_rules=dict(data.get("stat_rules", {})),
             max_heroes=int(data.get("max_heroes", 1)),
             preferred_classes=list(data.get("preferred_classes", [])),
             assigned_heroes=list(data.get("assigned_heroes", [])),
@@ -145,6 +156,10 @@ class CampaignTask:
             payout_multiplier=float(data.get("payout_multiplier", 1.0)),
             xp_multiplier=float(data.get("xp_multiplier", 1.0)),
             outcome_summary=str(data.get("outcome_summary", "")),
+            injured_heroes=list(data.get("injured_heroes", [])),
+            injury_rest_by_hero={str(k): float(v) for k, v in data.get("injury_rest_by_hero", {}).items()},
+            satisfaction_delta_by_hero={str(k): int(v) for k, v in data.get("satisfaction_delta_by_hero", {}).items()},
+            consequence_summary=list(data.get("consequence_summary", [])),
         )
 
 

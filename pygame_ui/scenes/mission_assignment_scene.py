@@ -21,9 +21,12 @@ from systems.campaign.campaign_constants import (
 from systems.campaign.campaign_runtime import acknowledge_task_results, resolve_open_decision
 from systems.campaign.task_dispatch import assign_heroes_to_task, find_task
 from systems.campaign.task_resolution import (
-    calculate_task_success,
+    calculate_task_success_chance,
     combined_party_dispatch_stats,
+    evaluate_stat_rule,
     format_dispatch_stats,
+    format_stat_rule_short,
+    get_task_stat_rules,
     hero_dispatch_stats,
 )
 
@@ -48,9 +51,18 @@ class MissionAssignmentScene(SceneBase):
         self.status_message = ""
         self.staged_team_names = []
 
+        self.result_animation_started = False
+        self.result_animation_done = False
+        self.result_animation_start_ticks = 0
+        self.result_animation_duration_ms = 1100
+        self.result_display_value = 0.0
+
         task = self.current_task()
         if task is not None and task.state != TASK_STATE_PENDING:
             self.staged_team_names = list(task.assigned_heroes)
+
+        if task is not None and task.state == TASK_STATE_AWAITING_ACK:
+            self.start_result_animation()
 
     def current_task(self):
         if self.runtime is None:
@@ -70,6 +82,37 @@ class MissionAssignmentScene(SceneBase):
 
         return event
 
+    def start_result_animation(self):
+        if self.result_animation_started:
+            return
+        self.result_animation_started = True
+        self.result_animation_done = False
+        self.result_animation_start_ticks = pygame.time.get_ticks()
+        self.result_display_value = 0.0
+
+    def update_result_animation(self):
+        task = self.current_task()
+        if task is None or task.state != TASK_STATE_AWAITING_ACK:
+            self.result_animation_started = False
+            self.result_animation_done = False
+            self.result_display_value = 0.0
+            return
+
+        if not self.result_animation_started:
+            self.start_result_animation()
+
+        target_value = max(0.0, min(1.0, float(task.success_chance)))
+        elapsed_ms = max(0, pygame.time.get_ticks() - self.result_animation_start_ticks)
+
+        if elapsed_ms >= self.result_animation_duration_ms:
+            self.result_display_value = target_value
+            self.result_animation_done = True
+            return
+
+        progress = elapsed_ms / float(self.result_animation_duration_ms)
+        self.result_display_value = target_value * progress
+        self.result_animation_done = False
+
     def handle_event(self, event):
         if self.handle_buttons_click(event, self.build_buttons()):
             return
@@ -80,6 +123,7 @@ class MissionAssignmentScene(SceneBase):
 
     def update(self, mouse_pos):
         super().update(mouse_pos)
+        self.update_result_animation()
 
     def draw(self, screen):
         self.clear_screen(screen)
@@ -100,7 +144,7 @@ class MissionAssignmentScene(SceneBase):
         title = self.title_font.render(task.task_type, True, theme.TEXT_PRIMARY)
         screen.blit(title, (50, 36))
 
-        state_text = f"State: {task.state.replace('_', ' ').title()}"
+        state_text = f"State: {self.friendly_task_state(task.state)}"
         screen.blit(self.font.render(state_text, True, theme.TEXT_SECONDARY), (420, 42))
 
         if self.status_message:
@@ -145,8 +189,7 @@ class MissionAssignmentScene(SceneBase):
             y += 28
 
         y += 14
-        story_lines = self.mission_story_lines(task)
-        for line in story_lines:
+        for line in self.mission_story_lines(task):
             for wrapped in wrap_text(line, self.small_font, rect.width - 40):
                 screen.blit(self.small_font.render(wrapped, True, theme.TEXT_SECONDARY), (rect.x + 20, y))
                 y += 20
@@ -163,12 +206,61 @@ class MissionAssignmentScene(SceneBase):
                 y += 20
 
         if task.state == TASK_STATE_AWAITING_ACK:
-            y += 8
+            y += 12
             screen.blit(self.font.render("Mission Result", True, theme.TEXT_PRIMARY), (rect.x + 20, y))
             y += 30
-            for wrapped in wrap_text(task.outcome_summary or "Mission complete.", self.small_font, rect.width - 40):
-                screen.blit(self.small_font.render(wrapped, True, theme.TEXT_SECONDARY), (rect.x + 20, y))
-                y += 20
+
+            self.draw_result_bar(screen, rect.x + 20, y, rect.width - 40, 28, task)
+            y += 44
+
+            if self.result_animation_done:
+                result_rows = self.build_result_rows(task)
+                for row in result_rows:
+                    for wrapped in wrap_text(row, self.small_font, rect.width - 40):
+                        screen.blit(self.small_font.render(wrapped, True, theme.TEXT_SECONDARY), (rect.x + 20, y))
+                        y += 20
+                    y += 4
+            else:
+                waiting_text = "Resolving outcome..."
+                screen.blit(self.small_font.render(waiting_text, True, theme.TEXT_SECONDARY), (rect.x + 20, y))
+
+    def draw_result_bar(self, screen, x, y, width, height, task):
+        bg_rect = pygame.Rect(x, y, width, height)
+        pygame.draw.rect(screen, (42, 42, 52), bg_rect, border_radius=8)
+        pygame.draw.rect(screen, (92, 96, 112), bg_rect, 1, border_radius=8)
+
+        fail_cutoff = 0.45
+        partial_cutoff = 0.70
+        success_cutoff = 0.90
+
+        for cutoff in (fail_cutoff, partial_cutoff, success_cutoff):
+            cut_x = x + int(width * cutoff)
+            pygame.draw.line(screen, (120, 120, 135), (cut_x, y), (cut_x, y + height), 1)
+
+        fill_width = max(0, min(width, int(width * self.result_display_value)))
+        if fill_width > 0:
+            fill_rect = pygame.Rect(x, y, fill_width, height)
+            pygame.draw.rect(screen, (185, 150, 70), fill_rect, border_radius=8)
+
+        label_y = y + height + 6
+        labels = [
+            ("Critical", 0.00),
+            ("Partial", 0.45),
+            ("Success", 0.70),
+            ("Great", 0.90),
+        ]
+        for label, frac in labels:
+            tx = x + int(width * frac)
+            screen.blit(self.small_font.render(label, True, theme.TEXT_MUTED), (tx, label_y))
+
+        percent_text = f"{self.result_display_value:.0%}"
+        percent_surface = self.font.render(percent_text, True, theme.TEXT_PRIMARY)
+        screen.blit(percent_surface, (x + width - percent_surface.get_width(), label_y + 20))
+
+        if self.result_animation_done:
+            outcome_text = self.outcome_label_from_value(task.success_chance)
+            outcome_surface = self.font.render(outcome_text, True, theme.TEXT_PRIMARY)
+            screen.blit(outcome_surface, (x, label_y + 20))
 
     def draw_team_assignment(self, screen, task, rect):
         staged_heroes = self.staged_team()
@@ -186,39 +278,35 @@ class MissionAssignmentScene(SceneBase):
 
         slot_rects = self.slot_rects(rect, task.max_heroes)
         for index, slot_rect in enumerate(slot_rects):
-            pygame.draw.rect(screen, (48, 48, 60), slot_rect, border_radius=8)
-            pygame.draw.rect(screen, (98, 102, 120), slot_rect, 1, border_radius=8)
+            self.draw_team_slot(screen, slot_rect, index, task)
 
-            if index < len(self.staged_team_names):
-                hero_name = self.staged_team_names[index]
-                hero = self.find_hero(hero_name)
-                label = hero.name if hero else hero_name
-                klass = getattr(hero, "hero_class", "Hero") if hero else "Hero"
+        if task.state == TASK_STATE_AWAITING_ACK:
+            compare_y = rect.y + 178
+            screen.blit(self.font.render("Requirement Overlap", True, theme.TEXT_PRIMARY), (rect.x + 20, compare_y))
+            compare_y += 32
 
-                screen.blit(
-                    self.small_font.render(
-                        truncate_text(label, self.small_font, slot_rect.width - 12),
-                        True,
-                        theme.TEXT_PRIMARY,
-                    ),
-                    (slot_rect.x + 8, slot_rect.y + 8),
+            stat_rules = get_task_stat_rules(task)
+            for stat_key in ["might", "guard", "wit", "presence", "swift"]:
+                self.draw_stat_comparison_row(
+                    screen=screen,
+                    x=rect.x + 20,
+                    y=compare_y,
+                    width=rect.width - 40,
+                    stat_key=stat_key,
+                    assigned_value=int(staged_stats.get(stat_key, 0)),
+                    rule=stat_rules.get(stat_key, {"mode": "minimum", "target": 0}),
                 )
-                screen.blit(
-                    self.small_font.render(
-                        truncate_text(klass, self.small_font, slot_rect.width - 12),
-                        True,
-                        theme.TEXT_MUTED,
-                    ),
-                    (slot_rect.x + 8, slot_rect.y + 28),
-                )
-                StatusChip(
-                    rect=(slot_rect.x + 8, slot_rect.bottom - 26, slot_rect.width - 16, 18),
-                    text="Assigned",
-                    style="info",
-                ).draw(screen, self.small_font)
-            else:
-                placeholder = self.small_font.render("Empty Slot", True, theme.TEXT_MUTED)
-                screen.blit(placeholder, (slot_rect.x + 8, slot_rect.y + 20))
+                compare_y += 42
+
+            preview_y = rect.y + 420
+            for row in self.team_preview_rows(task, staged_heroes):
+                screen.blit(self.small_font.render(row, True, theme.TEXT_SECONDARY), (rect.x + 20, preview_y))
+                preview_y += 22
+
+            summary_y = rect.y + 486
+            summary_text = format_dispatch_stats(staged_stats)
+            screen.blit(self.small_font.render(summary_text, True, theme.TEXT_PRIMARY), (rect.x + 20, summary_y))
+            return
 
         stats_y = rect.y + 180
         screen.blit(self.font.render("Team Strength", True, theme.TEXT_PRIMARY), (rect.x + 20, stats_y))
@@ -226,7 +314,7 @@ class MissionAssignmentScene(SceneBase):
 
         for stat_key in ["might", "guard", "wit", "presence", "swift"]:
             self.draw_stat_row(
-                screen,
+                screen=screen,
                 x=rect.x + 20,
                 y=stats_y,
                 label=DISPLAY_STAT_LABELS[stat_key],
@@ -236,34 +324,160 @@ class MissionAssignmentScene(SceneBase):
             stats_y += 40
 
         preview_y = rect.y + 395
-        if task.state == TASK_STATE_PENDING and staged_heroes:
-            result = calculate_task_success(task, staged_heroes)
-            preview_rows = [
-                f"Coverage: {result['raw_coverage_ratio']:.0%}",
-                f"Success: {result['success_chance']:.0%}",
-                f"Expected Outcome: {result['outcome_band'].replace('_', ' ').title()}",
-            ]
-        elif task.state != TASK_STATE_PENDING and task.assigned_heroes:
-            preview_rows = [
-                f"Assigned: {', '.join(task.assigned_heroes)}",
-                f"Coverage: {task.coverage_ratio:.0%}" if task.coverage_ratio > 0 else "Coverage: Pending",
-                f"Outcome: {task.outcome_band.replace('_', ' ').title()}" if task.outcome_band else "Outcome: Pending",
-            ]
-        else:
-            preview_rows = ["Select heroes to preview this team."]
-
-        for row in preview_rows:
+        for row in self.team_preview_rows(task, staged_heroes):
             screen.blit(self.small_font.render(row, True, theme.TEXT_SECONDARY), (rect.x + 20, preview_y))
             preview_y += 22
 
-        summary_y = rect.y + 470
+        summary_y = rect.y + 486
         summary_text = format_dispatch_stats(staged_stats)
         screen.blit(self.small_font.render(summary_text, True, theme.TEXT_PRIMARY), (rect.x + 20, summary_y))
+
+    def draw_stat_comparison_row(self, screen, x, y, width, stat_key, assigned_value, rule):
+        label = DISPLAY_STAT_LABELS.get(stat_key, stat_key.title())
+        label_surface = self.small_font.render(label, True, theme.TEXT_PRIMARY)
+        screen.blit(label_surface, (x, y + 2))
+
+        rule_text = format_stat_rule_short(rule)
+        rule_surface = self.small_font.render(rule_text, True, theme.TEXT_MUTED)
+        screen.blit(rule_surface, (x + 82, y + 2))
+
+        score = evaluate_stat_rule(assigned_value, rule)["score"]
+        score_percent = f"{score:.0%}"
+        score_color = (120, 200, 120) if score >= 0.99 else ((210, 180, 90) if score >= 0.70 else (200, 110, 110))
+        score_surface = self.small_font.render(score_percent, True, score_color)
+        screen.blit(score_surface, (x + width - score_surface.get_width(), y + 2))
+
+        track_x = x + 170
+        track_y = y + 18
+        track_w = width - 240
+        track_h = 14
+
+        pygame.draw.rect(screen, (42, 42, 52), (track_x, track_y, track_w, track_h), border_radius=7)
+        pygame.draw.rect(screen, (74, 76, 92), (track_x, track_y, track_w, track_h), 1, border_radius=7)
+
+        mode = str(rule.get("mode", "minimum")).lower()
+
+        if mode == "range":
+            min_value = int(rule.get("min", 0))
+            max_value = max(min_value, int(rule.get("max", min_value)))
+            scale_max = max(1, assigned_value, max_value)
+
+            band_start = int(track_w * (min_value / scale_max))
+            band_width = max(2, int(track_w * ((max_value - min_value) / scale_max))) if max_value > min_value else 2
+            pygame.draw.rect(
+                screen,
+                (80, 110, 150),
+                (track_x + band_start, track_y, band_width, track_h),
+                border_radius=7,
+            )
+
+            assigned_w = int(track_w * (assigned_value / scale_max))
+            if assigned_w > 0:
+                pygame.draw.rect(
+                    screen,
+                    (185, 150, 70),
+                    (track_x, track_y, assigned_w, track_h),
+                    border_radius=7,
+                )
+
+        elif mode == "maximum":
+            target = int(rule.get("target", 0))
+            scale_max = max(1, assigned_value, target)
+
+            allowed_w = int(track_w * (target / scale_max))
+            if allowed_w > 0:
+                pygame.draw.rect(
+                    screen,
+                    (70, 110, 90),
+                    (track_x, track_y, allowed_w, track_h),
+                    border_radius=7,
+                )
+
+            assigned_w = int(track_w * (assigned_value / scale_max))
+            if assigned_w > 0:
+                assigned_color = (185, 150, 70) if assigned_value <= target else (180, 95, 95)
+                pygame.draw.rect(
+                    screen,
+                    assigned_color,
+                    (track_x, track_y, assigned_w, track_h),
+                    border_radius=7,
+                )
+
+        else:
+            target = int(rule.get("target", 0))
+            scale_max = max(1, assigned_value, target)
+
+            target_w = int(track_w * (target / scale_max))
+            if target_w > 0:
+                pygame.draw.rect(
+                    screen,
+                    (80, 110, 150),
+                    (track_x, track_y, target_w, track_h),
+                    border_radius=7,
+                )
+
+            assigned_w = int(track_w * (assigned_value / scale_max))
+            if assigned_w > 0:
+                pygame.draw.rect(
+                    screen,
+                    (185, 150, 70),
+                    (track_x, track_y, assigned_w, track_h),
+                    border_radius=7,
+                )
+
+        value_text = str(assigned_value)
+        value_surface = self.small_font.render(value_text, True, theme.TEXT_PRIMARY)
+        screen.blit(value_surface, (track_x + track_w + 8, y + 16))
+
+    def draw_team_slot(self, screen, slot_rect, index, task):
+        is_filled = index < len(self.staged_team_names)
+
+        fill = (48, 48, 60) if not is_filled else (56, 66, 84)
+        pygame.draw.rect(screen, fill, slot_rect, border_radius=8)
+        pygame.draw.rect(screen, (98, 102, 120), slot_rect, 1, border_radius=8)
+
+        if is_filled:
+            hero_name = self.staged_team_names[index]
+            hero = self.find_hero(hero_name)
+            label = hero.name if hero else hero_name
+            klass = getattr(hero, "hero_class", "Hero") if hero else "Hero"
+
+            screen.blit(
+                self.small_font.render(
+                    truncate_text(label, self.small_font, slot_rect.width - 12),
+                    True,
+                    theme.TEXT_PRIMARY,
+                ),
+                (slot_rect.x + 8, slot_rect.y + 8),
+            )
+            screen.blit(
+                self.small_font.render(
+                    truncate_text(klass, self.small_font, slot_rect.width - 12),
+                    True,
+                    theme.TEXT_MUTED,
+                ),
+                (slot_rect.x + 8, slot_rect.y + 28),
+            )
+
+            chip_label = "Assigned" if task.state == TASK_STATE_PENDING else self.friendly_task_state(task.state)
+            chip_style = "info" if task.state == TASK_STATE_PENDING else "warning"
+            StatusChip(
+                rect=(slot_rect.x + 8, slot_rect.bottom - 26, slot_rect.width - 16, 18),
+                text=chip_label,
+                style=chip_style,
+            ).draw(screen, self.small_font)
+        else:
+            placeholder = self.small_font.render("Empty Slot", True, theme.TEXT_MUTED)
+            hint = self.small_font.render("Click a hero below", True, theme.TEXT_MUTED)
+            screen.blit(placeholder, (slot_rect.x + 8, slot_rect.y + 14))
+            if task.state == TASK_STATE_PENDING:
+                screen.blit(hint, (slot_rect.x + 8, slot_rect.y + 34))
 
     def draw_mission_hints(self, screen, task, rect):
         y = rect.y + 56
         for hint in self.generate_hints(task):
-            for wrapped in wrap_text(f"- {hint}", self.font, rect.width - 40):
+            bullet = f"• {hint}"
+            for wrapped in wrap_text(bullet, self.font, rect.width - 40):
                 screen.blit(self.font.render(wrapped, True, theme.TEXT_PRIMARY), (rect.x + 20, y))
                 y += 26
             y += 10
@@ -276,8 +490,11 @@ class MissionAssignmentScene(SceneBase):
             hero_state = self.runtime.hero_states.get(hero.name) if self.runtime else None
             state_text = hero_state.state if hero_state else "unknown"
             is_staged = hero.name in self.staged_team_names
+            is_clickable = task.state == TASK_STATE_PENDING and hero_state is not None and hero_state.state == HERO_STATE_AVAILABLE
 
             fill = (52, 52, 62)
+            border = (98, 102, 120)
+
             if state_text == HERO_STATE_AVAILABLE:
                 fill = (48, 62, 52)
             elif state_text == HERO_STATE_RESTING:
@@ -289,15 +506,21 @@ class MissionAssignmentScene(SceneBase):
 
             if is_staged:
                 fill = (62, 74, 92)
+                border = (135, 160, 210)
+            elif not is_clickable and task.state == TASK_STATE_PENDING:
+                fill = (46, 46, 50)
 
             pygame.draw.rect(screen, fill, card_rect, border_radius=10)
-            pygame.draw.rect(screen, (98, 102, 120), card_rect, 1, border_radius=10)
+            pygame.draw.rect(screen, border, card_rect, 1, border_radius=10)
+
+            name_color = theme.TEXT_PRIMARY if is_clickable or is_staged or task.state != TASK_STATE_PENDING else theme.TEXT_MUTED
+            sub_color = theme.TEXT_MUTED
 
             screen.blit(
                 self.small_font.render(
                     truncate_text(hero.name, self.small_font, card_rect.width - 12),
                     True,
-                    theme.TEXT_PRIMARY,
+                    name_color,
                 ),
                 (card_rect.x + 8, card_rect.y + 8),
             )
@@ -305,7 +528,7 @@ class MissionAssignmentScene(SceneBase):
                 self.small_font.render(
                     truncate_text(getattr(hero, "hero_class", "Hero"), self.small_font, card_rect.width - 12),
                     True,
-                    theme.TEXT_MUTED,
+                    sub_color,
                 ),
                 (card_rect.x + 8, card_rect.y + 28),
             )
@@ -315,12 +538,12 @@ class MissionAssignmentScene(SceneBase):
                 self.small_font.render(
                     truncate_text(stat_text, self.small_font, card_rect.width - 12),
                     True,
-                    theme.TEXT_MUTED,
+                    sub_color,
                 ),
                 (card_rect.x + 8, card_rect.y + 48),
             )
 
-            chip_text = "Assigned Here" if is_staged else state_text.replace("_", " ")
+            chip_text = "Assigned Here" if is_staged else self.friendly_hero_state(state_text)
             chip_style = "info" if is_staged else self.hero_state_chip_style(state_text)
             StatusChip(
                 rect=(card_rect.x + 8, card_rect.bottom - 24, card_rect.width - 16, 18),
@@ -380,7 +603,7 @@ class MissionAssignmentScene(SceneBase):
 
         if task.state == TASK_STATE_PENDING:
             buttons.append(Button((button_x, button_y, button_width, button_height), "Dispatch", self.dispatch_staged_team))
-        elif task.state == TASK_STATE_AWAITING_ACK:
+        elif task.state == TASK_STATE_AWAITING_ACK and self.result_animation_done:
             buttons.append(Button((button_x, button_y, button_width, button_height), "Return Heroes", self.acknowledge_results))
 
         return buttons
@@ -416,6 +639,10 @@ class MissionAssignmentScene(SceneBase):
 
             if hero_state is None or hero_state.state != HERO_STATE_AVAILABLE:
                 self.status_message = f"{hero.name} is not available."
+                return
+
+            task = self.current_task()
+            if task is None:
                 return
 
             if len(self.staged_team_names) >= task.max_heroes:
@@ -539,37 +766,122 @@ class MissionAssignmentScene(SceneBase):
             "Your guild must weigh speed, survival, and the strengths of the heroes you commit.",
         ]
 
+
+    def extract_reward_text(self, task):
+        summary = str(getattr(task, "outcome_summary", "") or "")
+        if "Reward " in summary:
+            reward_part = summary.split("Reward ", 1)[1]
+            return reward_part.strip()
+        return "—"
+
+    def build_result_rows(self, task):
+        rows = []
+
+        rows.append(f"Outcome: {self.outcome_label_from_value(task.success_chance)}")
+        rows.append(f"Reward: {self.extract_reward_text(task)}")
+
+        if getattr(task, "injured_heroes", []):
+            injured_names = ", ".join(task.injured_heroes[:2])
+            if len(task.injured_heroes) > 2:
+                injured_names += "..."
+            rows.append(f"Injuries: {injured_names}")
+        else:
+            rows.append("Injuries: None")
+
+        satisfaction_lines = []
+        for hero_name, delta in getattr(task, "satisfaction_delta_by_hero", {}).items():
+            if delta != 0:
+                sign = "+" if delta > 0 else ""
+                satisfaction_lines.append(f"{hero_name} {sign}{delta}")
+
+        if satisfaction_lines:
+            rows.append(f"Satisfaction: {', '.join(satisfaction_lines[:2])}")
+        else:
+            rows.append("Satisfaction: No change")
+
+        return rows
+
+    def team_preview_rows(self, task, staged_heroes):
+        if task.state == TASK_STATE_PENDING and staged_heroes:
+            return [
+                f"Assigned: {', '.join(hero.name for hero in staged_heroes)}",
+                f"Team Size: {len(staged_heroes)} / {task.max_heroes}",
+                "Mission requirements are hidden until the mission resolves.",
+            ]
+
+        if task.state == TASK_STATE_WAITING_FOR_DECISION:
+            return [
+                f"Assigned: {', '.join(task.assigned_heroes) or 'None'}",
+                "Decision pending.",
+                "Choose how the mission should proceed.",
+            ]
+
+        if task.state != TASK_STATE_PENDING and task.assigned_heroes:
+            return [
+                f"Assigned: {', '.join(task.assigned_heroes)}",
+                f"Team Fit: {task.coverage_ratio:.0%}" if task.coverage_ratio > 0 else "Team Fit: Pending",
+                f"Outcome: {self.outcome_label_from_value(task.success_chance)}" if task.success_chance > 0 else "Outcome: Pending",
+            ]
+
+        return ["Click heroes below to build this team."]
+
+    def outcome_label_from_value(self, value):
+        value = max(0.0, min(1.0, float(value)))
+        if value >= 0.90:
+            return "Great Success"
+        if value >= 0.70:
+            return "Success"
+        if value >= 0.45:
+            return "Partial Success"
+        return "Critical Failure"
+
+    def friendly_task_state(self, state_text):
+        mapping = {
+            TASK_STATE_PENDING: "Pending",
+            TASK_STATE_TRAVELING_TO: "Traveling",
+            TASK_STATE_ACTIVE: "In Progress",
+            TASK_STATE_WAITING_FOR_DECISION: "Waiting For Decision",
+            TASK_STATE_AWAITING_ACK: "Awaiting Review",
+        }
+        return mapping.get(state_text, state_text.replace("_", " ").title())
+
+    def friendly_hero_state(self, state_text):
+        mapping = {
+            HERO_STATE_AVAILABLE: "Available",
+            HERO_STATE_TRAVELING: "Traveling",
+            HERO_STATE_ON_TASK: "On Mission",
+            HERO_STATE_AWAITING_DECISION: "Decision Needed",
+            HERO_STATE_RETURNING: "Returning",
+            HERO_STATE_RESTING: "Resting",
+        }
+        return mapping.get(state_text, state_text.replace("_", " ").title())
+
     def generate_hints(self, task):
         hints = []
-        required = task.required_stats
+        stat_rules = get_task_stat_rules(task)
 
-        if required.get("swift", 0) >= 4:
-            hints.append("A swift response may matter here.")
-        elif required.get("swift", 0) >= 2:
-            hints.append("Mobility could improve your odds.")
+        for stat_name in ["might", "guard", "wit", "presence", "swift"]:
+            rule = stat_rules.get(stat_name, {})
+            mode = str(rule.get("mode", "minimum")).lower()
+            stat_label = DISPLAY_STAT_LABELS.get(stat_name, stat_name.title()).lower()
 
-        if required.get("guard", 0) >= 4:
-            hints.append("Survival and defense look important.")
-        elif required.get("guard", 0) >= 2:
-            hints.append("A sturdy hero may be useful.")
-
-        if required.get("wit", 0) >= 4:
-            hints.append("Careful planning could turn the tide.")
-        elif required.get("wit", 0) >= 2:
-            hints.append("A sharp mind may help.")
-
-        if required.get("presence", 0) >= 4:
-            hints.append("A commanding presence may be valuable.")
-        elif required.get("presence", 0) >= 2:
-            hints.append("Social skill may influence the outcome.")
-
-        if required.get("might", 0) >= 4:
-            hints.append("Raw force may be required.")
-        elif required.get("might", 0) >= 2:
-            hints.append("Some physical strength could help.")
+            if mode == "minimum":
+                target = int(rule.get("target", 0))
+                if target >= 4:
+                    hints.append(f"Strong {stat_label} will matter here.")
+                elif target >= 2:
+                    hints.append(f"Some {stat_label} could help.")
+            elif mode == "range":
+                hints.append(f"Balanced {stat_label} may be ideal.")
+            elif mode == "maximum":
+                hints.append(f"Too much {stat_label} could work against you.")
 
         if not hints:
             hints.append("This mission seems broadly manageable.")
+
+        if task.state == TASK_STATE_WAITING_FOR_DECISION:
+            hints.append("The mission is paused until you choose a response.")
+
         return hints[:5]
 
     def hero_state_chip_style(self, state_text):

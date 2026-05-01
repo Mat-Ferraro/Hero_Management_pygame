@@ -1,155 +1,184 @@
 from __future__ import annotations
 
+import copy
 import random
-from typing import Dict, List, Optional
 
-from .campaign_constants import CAMPAIGN_HOME_BASE_POSITION, CAMPAIGN_MAP_HEIGHT, CAMPAIGN_MAP_WIDTH
 from .campaign_models import CampaignTask
 
+MAP_POSITIONS = [
+    (440, 240),
+    (620, 170),
+    (810, 290),
+    (1000, 230),
+    (1180, 350),
+    (890, 470),
+    (610, 420),
+    (320, 350),
+]
 
-DISPATCH_STATS = ["might", "guard", "wit", "presence", "swift"]
-
-
-TASK_ARCHETYPES: List[Dict] = [
+TASK_TEMPLATES = [
     {
-        "task_type": "Bandit Raid",
-        "difficulty": 1,
-        "recommended_power": 55,
-        "expire_duration": 26.0,
-        "task_duration": 18.0,
-        "reward_gold_min": 50,
-        "reward_gold_max": 90,
-        "reward_xp": 24,
-        "preferred_classes": ["Warrior", "Rogue"],
-        "decision_chance": 0.10,
-        "rest_duration": 12.0,
-        "max_heroes": 2,
-        "required_stats": {"might": 4, "guard": 2, "wit": 1, "presence": 0, "swift": 2},
-    },
-    {
-        "task_type": "Escort Caravan",
+        "task_type": "Village Defense",
         "difficulty": 2,
-        "recommended_power": 85,
-        "expire_duration": 32.0,
-        "task_duration": 24.0,
-        "reward_gold_min": 80,
-        "reward_gold_max": 140,
-        "reward_xp": 36,
-        "preferred_classes": ["Warrior", "Cleric"],
-        "decision_chance": 0.15,
-        "rest_duration": 14.0,
         "max_heroes": 3,
-        "required_stats": {"might": 2, "guard": 5, "wit": 1, "presence": 2, "swift": 1},
+        "preferred_classes": ["Warrior", "Cleric"],
+        "decision_chance": 0.12,
+        "stat_rules": {
+            "might": {"mode": "minimum", "target": 5},
+            "guard": {"mode": "minimum", "target": 6},
+            "wit": {"mode": "minimum", "target": 2},
+            "presence": {"mode": "minimum", "target": 2},
+            "swift": {"mode": "range", "min": 2, "max": 5},
+        },
     },
     {
         "task_type": "Monster Hunt",
-        "difficulty": 2,
-        "recommended_power": 95,
-        "expire_duration": 30.0,
-        "task_duration": 28.0,
-        "reward_gold_min": 90,
-        "reward_gold_max": 160,
-        "reward_xp": 42,
-        "preferred_classes": ["Warrior", "Mage"],
-        "decision_chance": 0.18,
-        "rest_duration": 15.0,
+        "difficulty": 3,
         "max_heroes": 3,
-        "required_stats": {"might": 5, "guard": 3, "wit": 2, "presence": 0, "swift": 2},
+        "preferred_classes": ["Warrior", "Rogue"],
+        "decision_chance": 0.18,
+        "stat_rules": {
+            "might": {"mode": "minimum", "target": 6},
+            "guard": {"mode": "minimum", "target": 4},
+            "wit": {"mode": "range", "min": 1, "max": 4},
+            "presence": {"mode": "maximum", "target": 4},
+            "swift": {"mode": "minimum", "target": 4},
+        },
     },
     {
         "task_type": "Cursed Shrine",
         "difficulty": 3,
-        "recommended_power": 125,
-        "expire_duration": 36.0,
-        "task_duration": 30.0,
-        "reward_gold_min": 110,
-        "reward_gold_max": 190,
-        "reward_xp": 50,
-        "preferred_classes": ["Cleric", "Mage"],
-        "decision_chance": 0.28,
-        "rest_duration": 16.0,
         "max_heroes": 3,
-        "required_stats": {"might": 1, "guard": 2, "wit": 6, "presence": 3, "swift": 1},
+        "preferred_classes": ["Cleric", "Mage"],
+        "decision_chance": 0.25,
+        "stat_rules": {
+            "might": {"mode": "maximum", "target": 5},
+            "guard": {"mode": "range", "min": 2, "max": 5},
+            "wit": {"mode": "minimum", "target": 5},
+            "presence": {"mode": "minimum", "target": 4},
+            "swift": {"mode": "minimum", "target": 2},
+        },
     },
     {
-        "task_type": "Village Defense",
-        "difficulty": 3,
-        "recommended_power": 140,
-        "expire_duration": 24.0,
-        "task_duration": 34.0,
-        "reward_gold_min": 130,
-        "reward_gold_max": 220,
-        "reward_xp": 58,
-        "preferred_classes": ["Warrior", "Cleric", "Rogue"],
-        "decision_chance": 0.22,
-        "rest_duration": 18.0,
+        "task_type": "Escort Caravan",
+        "difficulty": 2,
         "max_heroes": 3,
-        "required_stats": {"might": 4, "guard": 6, "wit": 2, "presence": 3, "swift": 2},
+        "preferred_classes": ["Warrior", "Cleric", "Rogue"],
+        "decision_chance": 0.15,
+        "stat_rules": {
+            "might": {"mode": "range", "min": 2, "max": 5},
+            "guard": {"mode": "minimum", "target": 4},
+            "wit": {"mode": "range", "min": 2, "max": 5},
+            "presence": {"mode": "minimum", "target": 3},
+            "swift": {"mode": "minimum", "target": 3},
+        },
+    },
+    {
+        "task_type": "Apprehend Art Thieves",
+        "difficulty": 3,
+        "max_heroes": 3,
+        "preferred_classes": ["Rogue", "Mage"],
+        "decision_chance": 0.20,
+        "stat_rules": {
+            "might": {"mode": "maximum", "target": 4},
+            "guard": {"mode": "maximum", "target": 4},
+            "wit": {"mode": "minimum", "target": 6},
+            "presence": {"mode": "range", "min": 2, "max": 5},
+            "swift": {"mode": "minimum", "target": 5},
+        },
+    },
+    {
+        "task_type": "Diplomatic Escort",
+        "difficulty": 2,
+        "max_heroes": 3,
+        "preferred_classes": ["Cleric", "Warrior", "Mage"],
+        "decision_chance": 0.10,
+        "stat_rules": {
+            "might": {"mode": "maximum", "target": 4},
+            "guard": {"mode": "range", "min": 3, "max": 5},
+            "wit": {"mode": "range", "min": 2, "max": 5},
+            "presence": {"mode": "minimum", "target": 5},
+            "swift": {"mode": "range", "min": 2, "max": 5},
+        },
+    },
+    {
+        "task_type": "Scout Ruins",
+        "difficulty": 2,
+        "max_heroes": 2,
+        "preferred_classes": ["Rogue", "Mage"],
+        "decision_chance": 0.12,
+        "stat_rules": {
+            "might": {"mode": "maximum", "target": 3},
+            "guard": {"mode": "maximum", "target": 4},
+            "wit": {"mode": "minimum", "target": 4},
+            "presence": {"mode": "maximum", "target": 4},
+            "swift": {"mode": "minimum", "target": 5},
+        },
     },
 ]
 
 
-def random_task_position(rng: random.Random) -> tuple[int, int]:
-    return (
-        rng.randint(340, CAMPAIGN_MAP_WIDTH - 120),
-        rng.randint(120, CAMPAIGN_MAP_HEIGHT - 120),
-    )
+def _representative_required_stats(stat_rules: dict) -> dict:
+    required = {}
+    for stat_name, rule in stat_rules.items():
+        mode = str(rule.get("mode", "minimum")).lower()
+
+        if mode == "minimum":
+            required[stat_name] = int(rule.get("target", 0))
+        elif mode == "range":
+            min_value = int(rule.get("min", 0))
+            max_value = int(rule.get("max", min_value))
+            required[stat_name] = max(min_value, max_value)
+        elif mode == "maximum":
+            required[stat_name] = int(rule.get("target", 0))
+        else:
+            required[stat_name] = int(rule.get("target", 0))
+    return required
 
 
-def travel_time_from_home(position: tuple[int, int]) -> float:
-    home_x, home_y = CAMPAIGN_HOME_BASE_POSITION
-    pos_x, pos_y = position
-    distance = ((pos_x - home_x) ** 2 + (pos_y - home_y) ** 2) ** 0.5
-    return max(6.0, distance / 85.0)
+def _task_reward_values(difficulty: int, rng: random.Random) -> tuple[int, int, int]:
+    gold_min = 50 + (difficulty * 25) + rng.randint(0, 30)
+    gold_max = gold_min + 60 + (difficulty * 30) + rng.randint(0, 50)
+    xp_reward = 18 + (difficulty * 10) + rng.randint(0, 8)
+    return gold_min, gold_max, xp_reward
 
 
-def choose_task_archetype(
-    rng: random.Random,
-    unlocked_classes: Optional[List[str]] = None,
-) -> Dict:
-    candidates = list(TASK_ARCHETYPES)
+def create_runtime_task(task_id: str, now: float, rng: random.Random, unlocked_classes=None) -> CampaignTask:
+    template = copy.deepcopy(rng.choice(TASK_TEMPLATES))
 
-    if unlocked_classes:
-        unlocked = set(unlocked_classes)
-        filtered = [
-            task for task in candidates
-            if any(hero_class in unlocked for hero_class in task["preferred_classes"])
-        ]
-        if filtered:
-            candidates = filtered
+    difficulty = max(1, int(template.get("difficulty", 1)))
+    max_heroes = min(3, max(1, int(template.get("max_heroes", 1))))
 
-    return dict(rng.choice(candidates))
+    expire_time = now + rng.uniform(18.0, 28.0)
+    travel_time = rng.uniform(6.0, 12.0)
+    task_duration = rng.uniform(24.0, 40.0)
+    rest_duration = 12.0 + (difficulty * 4.0)
 
+    reward_gold_min, reward_gold_max, reward_xp = _task_reward_values(difficulty, rng)
 
-def create_runtime_task(
-    task_id: str,
-    now: float,
-    rng: random.Random,
-    unlocked_classes: Optional[List[str]] = None,
-) -> CampaignTask:
-    archetype = choose_task_archetype(rng, unlocked_classes=unlocked_classes)
-    map_position = random_task_position(rng)
-    travel_time = travel_time_from_home(map_position)
-
-    max_heroes = min(3, int(archetype.get("max_heroes", 1)))
+    stat_rules = dict(template.get("stat_rules", {}))
+    required_stats = _representative_required_stats(stat_rules)
+    recommended_power = sum(required_stats.values())
 
     return CampaignTask(
         task_id=task_id,
-        task_type=archetype["task_type"],
+        task_type=str(template["task_type"]),
         state="pending",
-        map_position=map_position,
+        map_position=rng.choice(MAP_POSITIONS),
         spawn_time=now,
-        expire_time=now + float(archetype["expire_duration"]),
+        expire_time=expire_time,
         travel_time=travel_time,
-        task_duration=float(archetype["task_duration"]),
-        recommended_power=int(archetype["recommended_power"]),
-        required_stats=dict(archetype.get("required_stats", {})),
+        task_duration=task_duration,
+        recommended_power=recommended_power,
+        required_stats=required_stats,
+        stat_rules=stat_rules,
         max_heroes=max_heroes,
-        preferred_classes=list(archetype["preferred_classes"]),
-        difficulty=int(archetype["difficulty"]),
-        reward_gold_min=int(archetype["reward_gold_min"]),
-        reward_gold_max=int(archetype["reward_gold_max"]),
-        reward_xp=int(archetype["reward_xp"]),
-        decision_chance=float(archetype["decision_chance"]),
-        rest_duration=float(archetype["rest_duration"]),
+        preferred_classes=list(template.get("preferred_classes", [])),
+        assigned_heroes=[],
+        difficulty=difficulty,
+        reward_gold_min=reward_gold_min,
+        reward_gold_max=reward_gold_max,
+        reward_xp=reward_xp,
+        decision_chance=float(template.get("decision_chance", 0.0)),
+        rest_duration=rest_duration,
     )

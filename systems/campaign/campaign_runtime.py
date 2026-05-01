@@ -31,7 +31,7 @@ from .task_dispatch import (
     start_hero_return,
 )
 from .task_generator import create_runtime_task
-from .task_resolution import calculate_task_success
+from .task_resolution import resolve_task_outcome_from_chance
 
 
 def create_campaign_runtime(
@@ -69,6 +69,20 @@ def find_hero_by_name(state, hero_name: str):
         if getattr(hero, "name", None) == hero_name:
             return hero
     return None
+
+
+def clamp_satisfaction(value: int) -> int:
+    return max(0, min(100, int(value)))
+
+
+def apply_hero_satisfaction_delta(hero, delta: int) -> int:
+    if hero is None or not hasattr(hero, "satisfaction"):
+        return 0
+
+    old_value = int(getattr(hero, "satisfaction", 50))
+    new_value = clamp_satisfaction(old_value + int(delta))
+    setattr(hero, "satisfaction", new_value)
+    return new_value - old_value
 
 
 def runtime_has_live_content(runtime: CampaignRuntime) -> bool:
@@ -208,9 +222,11 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         if hero is not None:
             heroes.append(hero)
 
-    result = calculate_task_success(task, heroes)
+    roll_value = rng.random()
+    result = resolve_task_outcome_from_chance(task, heroes, roll_value=roll_value)
+
     task.success_chance = float(result["success_chance"])
-    task.coverage_ratio = float(result["raw_coverage_ratio"])
+    task.coverage_ratio = float(result["fit_score"])
     task.outcome_band = str(result["outcome_band"])
     task.payout_multiplier = float(result["payout_multiplier"])
     task.xp_multiplier = float(result["xp_multiplier"])
@@ -223,12 +239,56 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
     gold_reward = rng.randint(reward_floor, reward_ceiling) if reward_ceiling > 0 else 0
     state.gold += gold_reward
 
+    task.injured_heroes = []
+    task.injury_rest_by_hero = {}
+    task.satisfaction_delta_by_hero = {}
+    task.consequence_summary = []
+
+    injury_profile = result["injury_profile"]
+    base_satisfaction_delta = int(result["satisfaction_delta"])
+
+    for hero in heroes:
+        hero_name = hero.name
+        injury_roll = rng.random()
+
+        extra_rest = 0.0
+        if injury_roll < float(injury_profile["injury_chance"]):
+            extra_rest = rng.uniform(
+                float(injury_profile["extra_rest_min"]),
+                float(injury_profile["extra_rest_max"]),
+            )
+            extra_rest = round(extra_rest, 1)
+            task.injured_heroes.append(hero_name)
+            task.injury_rest_by_hero[hero_name] = extra_rest
+
+        actual_delta = apply_hero_satisfaction_delta(hero, base_satisfaction_delta)
+        task.satisfaction_delta_by_hero[hero_name] = actual_delta
+
+    task.consequence_summary.append(f"Success chance was {task.success_chance:.0%}.")
+    task.consequence_summary.append(f"Outcome roll was {float(result['roll_value']):.0%}.")
+
+    if gold_reward > 0:
+        task.consequence_summary.append(f"Guild earned {gold_reward}g.")
+
+    if task.injured_heroes:
+        for hero_name in task.injured_heroes:
+            rest_time = task.injury_rest_by_hero.get(hero_name, 0.0)
+            task.consequence_summary.append(f"{hero_name} was injured and needs +{rest_time:.0f}s rest.")
+    else:
+        task.consequence_summary.append("No injuries reported.")
+
+    for hero_name, delta in task.satisfaction_delta_by_hero.items():
+        if delta > 0:
+            task.consequence_summary.append(f"{hero_name} gained {delta} satisfaction.")
+        elif delta < 0:
+            task.consequence_summary.append(f"{hero_name} lost {abs(delta)} satisfaction.")
+
     task.state = TASK_STATE_AWAITING_ACK
     task.completed_at = runtime.elapsed_time
     task.active_until = None
     task.outcome_summary = (
         f"{task.outcome_band.replace('_', ' ').title()} | "
-        f"Success {task.success_chance:.0%} | Reward {gold_reward}g"
+        f"Chance {task.success_chance:.0%} | Reward {gold_reward}g"
     )
 
     log_event(
@@ -236,6 +296,9 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         f"Task resolved: {task.task_type} ({task.task_id}) | "
         f"{task.outcome_summary} | awaiting acknowledgment",
     )
+
+    for summary_line in task.consequence_summary:
+        log_event(runtime, f" - {summary_line}")
 
 
 def acknowledge_task_results(runtime: CampaignRuntime, task_id: str, now: Optional[float] = None) -> tuple[bool, str]:
@@ -343,9 +406,15 @@ def tick_campaign_runtime(runtime: CampaignRuntime, state, delta_time: float, rn
         if hero_state.state == HERO_STATE_RETURNING:
             if hero_state.return_end_time is not None and runtime.elapsed_time >= hero_state.return_end_time:
                 related_task = find_task(runtime, hero_state.assigned_task_id) if hero_state.assigned_task_id else None
-                rest_duration = related_task.rest_duration if related_task else 14.0
+                extra_rest = 0.0
+                if related_task is not None:
+                    extra_rest = float(related_task.injury_rest_by_hero.get(hero_name, 0.0))
+                rest_duration = (related_task.rest_duration if related_task else 14.0) + extra_rest
                 start_hero_rest(runtime, hero_name, runtime.elapsed_time, rest_duration)
-                log_event(runtime, f"{hero_name} returned home and is now resting.")
+                if extra_rest > 0:
+                    log_event(runtime, f"{hero_name} returned home injured and is resting for {rest_duration:.0f}s.")
+                else:
+                    log_event(runtime, f"{hero_name} returned home and is now resting.")
 
         elif hero_state.state == HERO_STATE_RESTING:
             if hero_state.rest_end_time is not None and runtime.elapsed_time >= hero_state.rest_end_time:
