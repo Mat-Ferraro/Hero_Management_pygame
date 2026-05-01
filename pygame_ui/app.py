@@ -14,6 +14,7 @@ from pygame_ui.scenes.inventory_scene import InventoryScene
 from pygame_ui.scenes.main_menu_scene import MainMenuScene
 from pygame_ui.scenes.management_scene import ManagementScene
 from pygame_ui.scenes.market_scene import MarketScene
+from pygame_ui.scenes.mission_assignment_scene import MissionAssignmentScene
 from pygame_ui.scenes.rival_guilds_scene import RivalGuildsScene
 from pygame_ui.scenes.training_scene import TrainingScene
 
@@ -103,7 +104,7 @@ class App:
             on_save_game=self.save_current_game,
         )
 
-    def show_campaign(self):
+    def show_campaign(self, status_message=""):
         if self.state is None:
             return
 
@@ -114,6 +115,16 @@ class App:
         self.scene = CampaignMapScene(
             state=self.state,
             on_return_to_hub=self.show_game_hub,
+            on_open_task=self.show_mission_assignment,
+            on_save_game=self.save_current_game,
+            status_message=status_message,
+        )
+
+    def show_mission_assignment(self, task_id):
+        self.scene = MissionAssignmentScene(
+            state=self.state,
+            task_id=task_id,
+            on_return_to_campaign=self.show_campaign,
             on_save_game=self.save_current_game,
         )
 

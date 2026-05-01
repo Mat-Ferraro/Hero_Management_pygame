@@ -7,6 +7,9 @@ from .campaign_constants import CAMPAIGN_HOME_BASE_POSITION, CAMPAIGN_MAP_HEIGHT
 from .campaign_models import CampaignTask
 
 
+DISPATCH_STATS = ["might", "guard", "wit", "presence", "swift"]
+
+
 TASK_ARCHETYPES: List[Dict] = [
     {
         "task_type": "Bandit Raid",
@@ -20,6 +23,8 @@ TASK_ARCHETYPES: List[Dict] = [
         "preferred_classes": ["Warrior", "Rogue"],
         "decision_chance": 0.10,
         "rest_duration": 12.0,
+        "max_heroes": 2,
+        "required_stats": {"might": 4, "guard": 2, "wit": 1, "presence": 0, "swift": 2},
     },
     {
         "task_type": "Escort Caravan",
@@ -33,6 +38,8 @@ TASK_ARCHETYPES: List[Dict] = [
         "preferred_classes": ["Warrior", "Cleric"],
         "decision_chance": 0.15,
         "rest_duration": 14.0,
+        "max_heroes": 3,
+        "required_stats": {"might": 2, "guard": 5, "wit": 1, "presence": 2, "swift": 1},
     },
     {
         "task_type": "Monster Hunt",
@@ -46,6 +53,8 @@ TASK_ARCHETYPES: List[Dict] = [
         "preferred_classes": ["Warrior", "Mage"],
         "decision_chance": 0.18,
         "rest_duration": 15.0,
+        "max_heroes": 3,
+        "required_stats": {"might": 5, "guard": 3, "wit": 2, "presence": 0, "swift": 2},
     },
     {
         "task_type": "Cursed Shrine",
@@ -59,6 +68,8 @@ TASK_ARCHETYPES: List[Dict] = [
         "preferred_classes": ["Cleric", "Mage"],
         "decision_chance": 0.28,
         "rest_duration": 16.0,
+        "max_heroes": 3,
+        "required_stats": {"might": 1, "guard": 2, "wit": 6, "presence": 3, "swift": 1},
     },
     {
         "task_type": "Village Defense",
@@ -72,6 +83,8 @@ TASK_ARCHETYPES: List[Dict] = [
         "preferred_classes": ["Warrior", "Cleric", "Rogue"],
         "decision_chance": 0.22,
         "rest_duration": 18.0,
+        "max_heroes": 3,
+        "required_stats": {"might": 4, "guard": 6, "wit": 2, "presence": 3, "swift": 2},
     },
 ]
 
@@ -118,6 +131,8 @@ def create_runtime_task(
     map_position = random_task_position(rng)
     travel_time = travel_time_from_home(map_position)
 
+    max_heroes = min(3, int(archetype.get("max_heroes", 1)))
+
     return CampaignTask(
         task_id=task_id,
         task_type=archetype["task_type"],
@@ -128,6 +143,8 @@ def create_runtime_task(
         travel_time=travel_time,
         task_duration=float(archetype["task_duration"]),
         recommended_power=int(archetype["recommended_power"]),
+        required_stats=dict(archetype.get("required_stats", {})),
+        max_heroes=max_heroes,
         preferred_classes=list(archetype["preferred_classes"]),
         difficulty=int(archetype["difficulty"]),
         reward_gold_min=int(archetype["reward_gold_min"]),

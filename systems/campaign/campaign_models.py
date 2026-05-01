@@ -53,6 +53,8 @@ class CampaignTask:
     travel_time: float
     task_duration: float
     recommended_power: int
+    required_stats: Dict[str, int] = field(default_factory=dict)
+    max_heroes: int = 1
     preferred_classes: List[str] = field(default_factory=list)
     assigned_heroes: List[str] = field(default_factory=list)
     difficulty: int = 1
@@ -64,7 +66,14 @@ class CampaignTask:
     started_at: Optional[float] = None
     active_until: Optional[float] = None
     completed_at: Optional[float] = None
+    acknowledged_at: Optional[float] = None
     failed_reason: str = ""
+    outcome_band: str = ""
+    success_chance: float = 0.0
+    coverage_ratio: float = 0.0
+    payout_multiplier: float = 1.0
+    xp_multiplier: float = 1.0
+    outcome_summary: str = ""
 
     def is_terminal(self) -> bool:
         return self.state in {"completed", "failed", "expired"}
@@ -80,6 +89,8 @@ class CampaignTask:
             "travel_time": self.travel_time,
             "task_duration": self.task_duration,
             "recommended_power": self.recommended_power,
+            "required_stats": dict(self.required_stats),
+            "max_heroes": self.max_heroes,
             "preferred_classes": list(self.preferred_classes),
             "assigned_heroes": list(self.assigned_heroes),
             "difficulty": self.difficulty,
@@ -91,7 +102,14 @@ class CampaignTask:
             "started_at": self.started_at,
             "active_until": self.active_until,
             "completed_at": self.completed_at,
+            "acknowledged_at": self.acknowledged_at,
             "failed_reason": self.failed_reason,
+            "outcome_band": self.outcome_band,
+            "success_chance": self.success_chance,
+            "coverage_ratio": self.coverage_ratio,
+            "payout_multiplier": self.payout_multiplier,
+            "xp_multiplier": self.xp_multiplier,
+            "outcome_summary": self.outcome_summary,
         }
 
     @classmethod
@@ -106,6 +124,8 @@ class CampaignTask:
             travel_time=float(data["travel_time"]),
             task_duration=float(data["task_duration"]),
             recommended_power=int(data["recommended_power"]),
+            required_stats=dict(data.get("required_stats", {})),
+            max_heroes=int(data.get("max_heroes", 1)),
             preferred_classes=list(data.get("preferred_classes", [])),
             assigned_heroes=list(data.get("assigned_heroes", [])),
             difficulty=int(data.get("difficulty", 1)),
@@ -117,7 +137,14 @@ class CampaignTask:
             started_at=data.get("started_at"),
             active_until=data.get("active_until"),
             completed_at=data.get("completed_at"),
+            acknowledged_at=data.get("acknowledged_at"),
             failed_reason=str(data.get("failed_reason", "")),
+            outcome_band=str(data.get("outcome_band", "")),
+            success_chance=float(data.get("success_chance", 0.0)),
+            coverage_ratio=float(data.get("coverage_ratio", 0.0)),
+            payout_multiplier=float(data.get("payout_multiplier", 1.0)),
+            xp_multiplier=float(data.get("xp_multiplier", 1.0)),
+            outcome_summary=str(data.get("outcome_summary", "")),
         )
 
 

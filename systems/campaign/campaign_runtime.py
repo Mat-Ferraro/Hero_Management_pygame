@@ -14,6 +14,7 @@ from .campaign_constants import (
     HERO_STATE_RETURNING,
     HERO_STATE_TRAVELING,
     TASK_STATE_ACTIVE,
+    TASK_STATE_AWAITING_ACK,
     TASK_STATE_COMPLETED,
     TASK_STATE_EXPIRED,
     TASK_STATE_FAILED,
@@ -30,6 +31,7 @@ from .task_dispatch import (
     start_hero_return,
 )
 from .task_generator import create_runtime_task
+from .task_resolution import calculate_task_success
 
 
 def create_campaign_runtime(
@@ -60,6 +62,13 @@ def log_event(runtime: CampaignRuntime, message: str) -> None:
 def ensure_hero_states_for_roster(runtime: CampaignRuntime, roster) -> None:
     for hero in roster:
         get_or_create_hero_dispatch_state(runtime, hero.name)
+
+
+def find_hero_by_name(state, hero_name: str):
+    for hero in getattr(state, "roster", []):
+        if getattr(hero, "name", None) == hero_name:
+            return hero
+    return None
 
 
 def runtime_has_live_content(runtime: CampaignRuntime) -> bool:
@@ -108,8 +117,7 @@ def spawn_next_task(runtime: CampaignRuntime, state, rng: random.Random) -> Opti
 
     log_event(
         runtime,
-        f"New task spawned: {task.task_type} ({task.task_id}) | "
-        f"duration={task.task_duration:.1f}s | expire={task.expire_time:.1f}",
+        f"New task spawned: {task.task_type} ({task.task_id}) | max heroes {task.max_heroes}",
     )
     return task_id
 
@@ -163,16 +171,8 @@ def begin_task_execution(runtime: CampaignRuntime, task) -> None:
     log_event(
         runtime,
         f"Task started: {task.task_type} ({task.task_id}) | "
-        f"now={runtime.elapsed_time:.2f} | duration={task.task_duration:.2f} | "
-        f"active_until={task.active_until:.2f}",
+        f"team size={len(task.assigned_heroes)} | completes at {task.active_until:.2f}",
     )
-
-    if task.active_until <= runtime.elapsed_time:
-        log_event(
-            runtime,
-            f"WARNING: task {task.task_id} started with invalid active_until "
-            f"({task.active_until:.2f} <= {runtime.elapsed_time:.2f})",
-        )
 
 
 def resolve_open_decision(runtime: CampaignRuntime, choice_id: str) -> str:
@@ -202,24 +202,56 @@ def resolve_open_decision(runtime: CampaignRuntime, choice_id: str) -> str:
 
 
 def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> None:
-    log_event(
-        runtime,
-        f"Completing task: {task.task_type} ({task.task_id}) | "
-        f"now={runtime.elapsed_time:.2f} | active_until={task.active_until}",
-    )
+    heroes = []
+    for hero_name in task.assigned_heroes:
+        hero = find_hero_by_name(state, hero_name)
+        if hero is not None:
+            heroes.append(hero)
 
-    task.state = TASK_STATE_COMPLETED
-    task.completed_at = runtime.elapsed_time
-    task.active_until = None
-    runtime.completed_task_ids.append(task.task_id)
+    result = calculate_task_success(task, heroes)
+    task.success_chance = float(result["success_chance"])
+    task.coverage_ratio = float(result["raw_coverage_ratio"])
+    task.outcome_band = str(result["outcome_band"])
+    task.payout_multiplier = float(result["payout_multiplier"])
+    task.xp_multiplier = float(result["xp_multiplier"])
 
-    gold_reward = rng.randint(task.reward_gold_min, task.reward_gold_max)
+    reward_floor = int(round(task.reward_gold_min * task.payout_multiplier))
+    reward_ceiling = int(round(task.reward_gold_max * task.payout_multiplier))
+    reward_floor = max(0, reward_floor)
+    reward_ceiling = max(reward_floor, reward_ceiling)
+
+    gold_reward = rng.randint(reward_floor, reward_ceiling) if reward_ceiling > 0 else 0
     state.gold += gold_reward
 
+    task.state = TASK_STATE_AWAITING_ACK
+    task.completed_at = runtime.elapsed_time
+    task.active_until = None
+    task.outcome_summary = (
+        f"{task.outcome_band.replace('_', ' ').title()} | "
+        f"Success {task.success_chance:.0%} | Reward {gold_reward}g"
+    )
+
     log_event(
         runtime,
-        f"Task completed: {task.task_type} ({task.task_id}) for {gold_reward}g.",
+        f"Task resolved: {task.task_type} ({task.task_id}) | "
+        f"{task.outcome_summary} | awaiting acknowledgment",
     )
+
+
+def acknowledge_task_results(runtime: CampaignRuntime, task_id: str, now: Optional[float] = None) -> tuple[bool, str]:
+    task = find_task(runtime, task_id)
+    if task is None:
+        return False, "Task not found."
+
+    if task.state != TASK_STATE_AWAITING_ACK:
+        return False, "Task is not awaiting acknowledgment."
+
+    if now is None:
+        now = runtime.elapsed_time
+
+    task.state = TASK_STATE_COMPLETED
+    task.acknowledged_at = now
+    runtime.completed_task_ids.append(task.task_id)
 
     return_time = task.travel_time * DEFAULT_RETURN_TIME_MULTIPLIER
     for hero_name in task.assigned_heroes:
@@ -227,9 +259,12 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
             runtime=runtime,
             hero_name=hero_name,
             task_id=task.task_id,
-            now=runtime.elapsed_time,
+            now=now,
             return_time=return_time,
         )
+
+    log_event(runtime, f"Task acknowledged: {task.task_type} ({task.task_id}) | heroes returning.")
+    return True, "Heroes are returning."
 
 
 def fail_task(runtime: CampaignRuntime, task, reason: str) -> None:
@@ -249,15 +284,6 @@ def fail_task(runtime: CampaignRuntime, task, reason: str) -> None:
         )
 
 
-def should_task_fail_after_execution(runtime: CampaignRuntime, state, task, rng: random.Random) -> bool:
-    """
-    Placeholder MVP failure logic.
-    Right now tasks usually succeed. Later this should use hero power,
-    preferred class matches, injuries, multi-hero assignment, etc.
-    """
-    return False
-
-
 def tick_campaign_runtime(runtime: CampaignRuntime, state, delta_time: float, rng: Optional[random.Random] = None) -> None:
     if not runtime.active:
         return
@@ -275,15 +301,12 @@ def tick_campaign_runtime(runtime: CampaignRuntime, state, delta_time: float, rn
     if runtime.total_spawns < runtime.max_spawns and runtime.elapsed_time >= runtime.next_spawn_time:
         spawn_next_task(runtime, state, rng)
 
-    # Only completely unassigned tasks can expire.
     for task in runtime.active_tasks:
         if task.state == TASK_STATE_PENDING and runtime.elapsed_time >= task.expire_time:
             task.state = TASK_STATE_EXPIRED
             runtime.expired_task_ids.append(task.task_id)
             log_event(runtime, f"Task expired: {task.task_type} ({task.task_id}).")
 
-    # Assigned tasks no longer fail for arriving after the original pending timer.
-    # Once assigned, they are committed and should execute normally after arrival.
     for task in runtime.active_tasks:
         if task.state != TASK_STATE_TRAVELING_TO:
             continue
@@ -314,10 +337,7 @@ def tick_campaign_runtime(runtime: CampaignRuntime, state, delta_time: float, rn
             continue
 
         if runtime.elapsed_time >= task.active_until:
-            if should_task_fail_after_execution(runtime, state, task, rng):
-                fail_task(runtime, task, "task execution failed")
-            else:
-                complete_task(runtime, state, task, rng)
+            complete_task(runtime, state, task, rng)
 
     for hero_name, hero_state in runtime.hero_states.items():
         if hero_state.state == HERO_STATE_RETURNING:

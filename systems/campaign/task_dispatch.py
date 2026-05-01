@@ -53,11 +53,19 @@ def can_assign_party_to_task(
     if task is None:
         return False, "Task not found."
 
+    hero_names = list(hero_names)
+
     if task.state != TASK_STATE_PENDING:
         return False, "Task is no longer assignable."
 
     if not hero_names:
         return False, "No heroes selected."
+
+    if len(hero_names) > task.max_heroes:
+        return False, f"This task allows only {task.max_heroes} heroes."
+
+    if len(set(hero_names)) != len(hero_names):
+        return False, "Duplicate hero selection is not allowed."
 
     for hero_name in hero_names:
         allowed, reason = can_assign_hero_to_task(runtime, hero_name)
@@ -87,6 +95,11 @@ def assign_heroes_to_task(
     task.active_until = None
     task.completed_at = None
     task.failed_reason = ""
+    task.outcome_band = ""
+    task.success_chance = 0.0
+    task.coverage_ratio = 0.0
+    task.payout_multiplier = 1.0
+    task.xp_multiplier = 1.0
 
     for hero_name in hero_names:
         hero_state = get_or_create_hero_dispatch_state(runtime, hero_name)
