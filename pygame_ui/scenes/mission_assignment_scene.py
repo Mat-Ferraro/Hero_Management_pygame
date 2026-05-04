@@ -253,15 +253,6 @@ class MissionAssignmentScene(SceneBase):
             tx = x + int(width * frac)
             screen.blit(self.small_font.render(label, True, theme.TEXT_MUTED), (tx, label_y))
 
-        percent_text = f"{self.result_display_value:.0%}"
-        percent_surface = self.font.render(percent_text, True, theme.TEXT_PRIMARY)
-        screen.blit(percent_surface, (x + width - percent_surface.get_width(), label_y + 20))
-
-        if self.result_animation_done:
-            outcome_text = self.outcome_label_from_value(task.success_chance)
-            outcome_surface = self.font.render(outcome_text, True, theme.TEXT_PRIMARY)
-            screen.blit(outcome_surface, (x, label_y + 20))
-
     def draw_team_assignment(self, screen, task, rect):
         staged_heroes = self.staged_team()
         staged_stats = combined_party_dispatch_stats(staged_heroes) if staged_heroes else {
@@ -780,6 +771,15 @@ class MissionAssignmentScene(SceneBase):
         rows.append(f"Outcome: {self.outcome_label_from_value(task.success_chance)}")
         rows.append(f"Reward: {self.extract_reward_text(task)}")
 
+        ability_line = None
+        for line in getattr(task, "consequence_summary", []):
+            if str(line).startswith("Ability:"):
+                ability_line = line.replace("Ability: ", "", 1)
+                break
+
+        if ability_line:
+            rows.append(f"Ability: {ability_line}")
+
         if getattr(task, "injured_heroes", []):
             injured_names = ", ".join(task.injured_heroes[:2])
             if len(task.injured_heroes) > 2:
@@ -788,16 +788,15 @@ class MissionAssignmentScene(SceneBase):
         else:
             rows.append("Injuries: None")
 
-        satisfaction_lines = []
-        for hero_name, delta in getattr(task, "satisfaction_delta_by_hero", {}).items():
-            if delta != 0:
-                sign = "+" if delta > 0 else ""
-                satisfaction_lines.append(f"{hero_name} {sign}{delta}")
+        tp_lines = []
+        for hero_name, amount in getattr(task, "training_points_by_hero", {}).items():
+            if amount > 0:
+                tp_lines.append(f"{hero_name} +{amount}")
 
-        if satisfaction_lines:
-            rows.append(f"Satisfaction: {', '.join(satisfaction_lines[:2])}")
+        if tp_lines:
+            rows.append(f"Training: {', '.join(tp_lines[:2])}")
         else:
-            rows.append("Satisfaction: No change")
+            rows.append("Training: None")
 
         return rows
 

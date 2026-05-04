@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from systems.hero_abilities import apply_party_ability_modifiers
+
 DISPATCH_STATS = ["might", "guard", "wit", "presence", "swift"]
 
 
@@ -296,6 +298,10 @@ def calculate_task_success_chance(task, heroes: List) -> Dict:
     success_chance = fit_score
     success_chance += preferred_class_bonus(task, heroes)
     success_chance += party_size_bonus(task, heroes)
+
+    ability_data = apply_party_ability_modifiers(task, heroes)
+    success_chance += float(ability_data["success_bonus"])
+
     success_chance = max(0.0, min(1.0, success_chance))
 
     return {
@@ -305,6 +311,7 @@ def calculate_task_success_chance(task, heroes: List) -> Dict:
         "stat_breakdown": stat_breakdown,
         "fit_score": fit_score,
         "success_chance": success_chance,
+        "ability_modifiers": ability_data,
     }
 
 
@@ -320,14 +327,25 @@ def resolve_task_outcome_from_chance(task, heroes: List, roll_value: float) -> D
         roll_value=roll_value,
     )
 
+    ability_data = dict(chance_data.get("ability_modifiers", {}) or {})
+
+    injury_profile = injury_profile_for_band(outcome_band)
+    injury_profile = {
+        "injury_chance": max(0.0, min(1.0, float(injury_profile["injury_chance"]) * float(ability_data.get("injury_multiplier", 1.0)))),
+        "extra_rest_min": float(injury_profile["extra_rest_min"]),
+        "extra_rest_max": float(injury_profile["extra_rest_max"]),
+    }
+
+    satisfaction_delta = satisfaction_delta_for_band(outcome_band) + int(ability_data.get("satisfaction_bonus", 0))
+
     chance_data.update(
         {
             "roll_value": roll_value,
             "outcome_band": outcome_band,
             "payout_multiplier": payout_multiplier_for_band(outcome_band),
             "xp_multiplier": xp_multiplier_for_band(outcome_band),
-            "injury_profile": injury_profile_for_band(outcome_band),
-            "satisfaction_delta": satisfaction_delta_for_band(outcome_band),
+            "injury_profile": injury_profile,
+            "satisfaction_delta": satisfaction_delta,
         }
     )
     return chance_data

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import random
 
 from .campaign_models import CampaignTask
@@ -117,6 +118,8 @@ TASK_TEMPLATES = [
     },
 ]
 
+MIN_TASK_SEPARATION = 120.0
+
 
 def _representative_required_stats(stat_rules: dict) -> dict:
     required = {}
@@ -143,7 +146,32 @@ def _task_reward_values(difficulty: int, rng: random.Random) -> tuple[int, int, 
     return gold_min, gold_max, xp_reward
 
 
-def create_runtime_task(task_id: str, now: float, rng: random.Random, unlocked_classes=None) -> CampaignTask:
+def _distance(a: tuple[int, int], b: tuple[int, int]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def choose_task_position(rng: random.Random, existing_tasks) -> tuple[int, int]:
+    occupied_positions = [
+        tuple(task.map_position)
+        for task in existing_tasks
+        if getattr(task, "state", "") not in {"completed", "failed", "expired"}
+    ]
+
+    shuffled_positions = list(MAP_POSITIONS)
+    rng.shuffle(shuffled_positions)
+
+    for candidate in shuffled_positions:
+        if all(_distance(candidate, occupied) >= MIN_TASK_SEPARATION for occupied in occupied_positions):
+            return candidate
+
+    for candidate in shuffled_positions:
+        if candidate not in occupied_positions:
+            return candidate
+
+    return rng.choice(shuffled_positions)
+
+
+def create_runtime_task(task_id: str, now: float, rng: random.Random, unlocked_classes=None, existing_tasks=None) -> CampaignTask:
     template = copy.deepcopy(rng.choice(TASK_TEMPLATES))
 
     difficulty = max(1, int(template.get("difficulty", 1)))
@@ -160,11 +188,13 @@ def create_runtime_task(task_id: str, now: float, rng: random.Random, unlocked_c
     required_stats = _representative_required_stats(stat_rules)
     recommended_power = sum(required_stats.values())
 
+    map_position = choose_task_position(rng, existing_tasks or [])
+
     return CampaignTask(
         task_id=task_id,
         task_type=str(template["task_type"]),
         state="pending",
-        map_position=rng.choice(MAP_POSITIONS),
+        map_position=map_position,
         spawn_time=now,
         expire_time=expire_time,
         travel_time=travel_time,

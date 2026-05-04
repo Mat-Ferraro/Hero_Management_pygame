@@ -43,8 +43,11 @@ def item_from_dict(data: Dict) -> Item:
         enemy_affinity=list(data.get("enemy_affinity", [])),
     )
 
-
 def hero_to_dict(hero: Hero) -> Dict:
+    from systems.hero_progression import progression_to_dict, ensure_progression_fields
+
+    ensure_progression_fields(hero)
+
     return {
         "name": hero.name,
         "hero_class": hero.hero_class,
@@ -68,10 +71,12 @@ def hero_to_dict(hero: Hero) -> Dict:
         "participated_this_cycle": getattr(hero, "participated_this_cycle", False),
         "subclass": getattr(hero, "subclass", None),
         "special_ability": getattr(hero, "special_ability", None),
+        "progression": progression_to_dict(hero),
     }
 
-
 def hero_from_dict(data: Dict) -> Hero:
+    from systems.hero_progression import apply_progression_from_dict, ensure_progression_fields
+
     hero = Hero(
         name=data["name"],
         hero_class=data["hero_class"],
@@ -85,10 +90,7 @@ def hero_from_dict(data: Dict) -> Hero:
         specialty=data.get("specialty", "Adventurer"),
         growth_rate=data.get("growth_rate", "Talented"),
         contract_attitude=data.get("contract_attitude", "Practical"),
-        equipment={
-            slot: item_from_dict(item_data)
-            for slot, item_data in data.get("equipment", {}).items()
-        },
+        equipment={slot: item_from_dict(item_data) for slot, item_data in data.get("equipment", {}).items()},
         injured_years_remaining=int(data.get("injured_years_remaining", 0)),
         wound_history=list(data.get("wound_history", [])),
         current_health=data.get("current_health"),
@@ -99,8 +101,11 @@ def hero_from_dict(data: Dict) -> Hero:
         subclass=data.get("subclass"),
         special_ability=data.get("special_ability"),
     )
-    return hero
 
+    ensure_progression_fields(hero)
+    apply_progression_from_dict(hero, data.get("progression"))
+
+    return hero
 
 def dungeon_to_dict(dungeon: Dungeon) -> Dict:
     return {

@@ -32,7 +32,7 @@ from .task_dispatch import (
 )
 from .task_generator import create_runtime_task
 from .task_resolution import resolve_task_outcome_from_chance
-
+from systems.hero_progression import award_training_points_for_outcome
 
 def create_campaign_runtime(
     max_spawns: int = DEFAULT_CAMPAIGN_MAX_SPAWNS,
@@ -123,6 +123,7 @@ def spawn_next_task(runtime: CampaignRuntime, state, rng: random.Random) -> Opti
         now=runtime.elapsed_time,
         rng=rng,
         unlocked_classes=list(getattr(state.guild_upgrades, "unlocked_classes", [])),
+        existing_tasks=runtime.active_tasks,
     )
 
     runtime.active_tasks.append(task)
@@ -134,7 +135,6 @@ def spawn_next_task(runtime: CampaignRuntime, state, rng: random.Random) -> Opti
         f"New task spawned: {task.task_type} ({task.task_id}) | max heroes {task.max_heroes}",
     )
     return task_id
-
 
 def maybe_open_decision_for_task(runtime: CampaignRuntime, task, rng: random.Random) -> bool:
     if task.decision_chance <= 0:
@@ -214,7 +214,6 @@ def resolve_open_decision(runtime: CampaignRuntime, choice_id: str) -> str:
     begin_task_execution(runtime, task)
     return f"Resolved decision for {task.task_id}."
 
-
 def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> None:
     heroes = []
     for hero_name in task.assigned_heroes:
@@ -242,6 +241,7 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
     task.injured_heroes = []
     task.injury_rest_by_hero = {}
     task.satisfaction_delta_by_hero = {}
+    task.training_points_by_hero = {}
     task.consequence_summary = []
 
     injury_profile = result["injury_profile"]
@@ -264,8 +264,16 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         actual_delta = apply_hero_satisfaction_delta(hero, base_satisfaction_delta)
         task.satisfaction_delta_by_hero[hero_name] = actual_delta
 
+        tp_messages = award_training_points_for_outcome(hero, task.outcome_band)
+        if tp_messages:
+            awarded = 2 if task.outcome_band == "great_success" else 1
+            task.training_points_by_hero[hero_name] = awarded
+
     task.consequence_summary.append(f"Success chance was {task.success_chance:.0%}.")
-    task.consequence_summary.append(f"Outcome roll was {float(result['roll_value']):.0%}.")
+
+    ability_notes = list(result.get("ability_modifiers", {}).get("notes", []))
+    for line in ability_notes[:3]:
+        task.consequence_summary.append(line)
 
     if gold_reward > 0:
         task.consequence_summary.append(f"Guild earned {gold_reward}g.")
@@ -283,6 +291,10 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         elif delta < 0:
             task.consequence_summary.append(f"{hero_name} lost {abs(delta)} satisfaction.")
 
+    for hero_name, amount in task.training_points_by_hero.items():
+        if amount > 0:
+            task.consequence_summary.append(f"{hero_name} gained {amount} training point(s).")
+
     task.state = TASK_STATE_AWAITING_ACK
     task.completed_at = runtime.elapsed_time
     task.active_until = None
@@ -299,7 +311,6 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
 
     for summary_line in task.consequence_summary:
         log_event(runtime, f" - {summary_line}")
-
 
 def acknowledge_task_results(runtime: CampaignRuntime, task_id: str, now: Optional[float] = None) -> tuple[bool, str]:
     task = find_task(runtime, task_id)

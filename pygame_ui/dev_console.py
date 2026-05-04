@@ -1,6 +1,7 @@
 import pygame
 
 from game_state import refresh_contract_market
+from systems.hero_progression import ensure_progression_fields
 
 
 class DevConsole:
@@ -83,7 +84,7 @@ class DevConsole:
         screen.blit(self.font.render(prompt, True, (210, 240, 210)), (50, 72))
 
         y = 105
-        max_width = 1160  # fits inside panel padding
+        max_width = 1160
 
         for entry in self.history[-4:]:
             wrapped_lines = self.wrap_text(entry, self.small_font, max_width)
@@ -140,6 +141,17 @@ class DevConsole:
             value = max(0, min(3, value))
             state.guild_upgrades.training_hall_level = value
             return f"Training Hall level set to {value}."
+
+        if name in ("training_points", "add_tp", "tp_all"):
+            amount = self.require_int(args, "amount")
+            updated_count = 0
+
+            for hero in state.roster:
+                ensure_progression_fields(hero)
+                hero.training_points += amount
+                updated_count += 1
+
+            return f"Added {amount} training point(s) to {updated_count} active roster hero(es)."
 
         if name == "unlock_all_classes":
             state.guild_upgrades.unlocked_classes = ["Warrior", "Rogue", "Cleric", "Mage"]
@@ -239,7 +251,7 @@ class DevConsole:
     def help_text(self):
         return (
             "Commands: money N, set_gold N, unlock_market, unlock_training, training_level N, "
-            "unlock_all_classes, unlock_all, upgrade_all, upgrade_roster N, upgrade_missions N, "
-            "upgrade_recruits N, stipend N, refresh_recruits, heal_all, satisfy_all, "
-            "add_xp N, level_all N, age_all N, save"
+            "training_points N, add_tp N, tp_all N, unlock_all_classes, unlock_all, upgrade_all, "
+            "upgrade_roster N, upgrade_missions N, upgrade_recruits N, stipend N, refresh_recruits, "
+            "heal_all, satisfy_all, add_xp N, level_all N, age_all N, save"
         )

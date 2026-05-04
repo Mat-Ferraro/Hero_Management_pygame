@@ -78,6 +78,7 @@ class CampaignTask:
     injured_heroes: List[str] = field(default_factory=list)
     injury_rest_by_hero: Dict[str, float] = field(default_factory=dict)
     satisfaction_delta_by_hero: Dict[str, int] = field(default_factory=dict)
+    training_points_by_hero: Dict[str, int] = field(default_factory=dict)
     consequence_summary: List[str] = field(default_factory=list)
 
     def is_terminal(self) -> bool:
@@ -119,6 +120,7 @@ class CampaignTask:
             "injured_heroes": list(self.injured_heroes),
             "injury_rest_by_hero": dict(self.injury_rest_by_hero),
             "satisfaction_delta_by_hero": dict(self.satisfaction_delta_by_hero),
+            "training_points_by_hero": dict(self.training_points_by_hero),
             "consequence_summary": list(self.consequence_summary),
         }
 
@@ -159,9 +161,9 @@ class CampaignTask:
             injured_heroes=list(data.get("injured_heroes", [])),
             injury_rest_by_hero={str(k): float(v) for k, v in data.get("injury_rest_by_hero", {}).items()},
             satisfaction_delta_by_hero={str(k): int(v) for k, v in data.get("satisfaction_delta_by_hero", {}).items()},
+            training_points_by_hero={str(k): int(v) for k, v in data.get("training_points_by_hero", {}).items()},
             consequence_summary=list(data.get("consequence_summary", [])),
         )
-
 
 @dataclass
 class CampaignDecisionEvent:

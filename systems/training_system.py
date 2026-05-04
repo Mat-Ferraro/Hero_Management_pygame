@@ -1,3 +1,12 @@
+from __future__ import annotations
+
+from systems.hero_progression import (
+    available_training_paths,
+    can_spend_training_point,
+    ensure_progression_fields,
+    spend_training_point,
+)
+
 TRAINING_COST_BY_LEVEL = {
     1: 50,
     2: 75,
@@ -20,6 +29,8 @@ def training_xp(training_hall_level: int) -> int:
 
 
 def can_train_hero(hero) -> tuple[bool, str]:
+    ensure_progression_fields(hero)
+
     if hero.is_temporary_survivor:
         return False, "Temporary survivors cannot train."
 
@@ -58,3 +69,18 @@ def train_hero(state, hero) -> list[str]:
     messages.append(f"{hero.name} appreciated the training opportunity.")
 
     return messages
+
+
+def specialization_paths_for_hero(hero) -> dict:
+    ensure_progression_fields(hero)
+    return available_training_paths(hero)
+
+
+def can_specialize_hero(hero, path_name: str) -> tuple[bool, str]:
+    ensure_progression_fields(hero)
+    return can_spend_training_point(hero, path_name)
+
+
+def specialize_hero(hero, path_name: str) -> list[str]:
+    ensure_progression_fields(hero)
+    return spend_training_point(hero, path_name)
