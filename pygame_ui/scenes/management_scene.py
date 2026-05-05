@@ -35,6 +35,8 @@ from systems.contract_negotiation import (
     visible_offer_modifiers,
     visible_renewal_modifiers,
 )
+from systems.hero_career import career_phase_name, career_phase_summary
+from systems.hero_progression import ensure_progression_fields
 
 from ..widgets.button import Button
 
@@ -119,6 +121,11 @@ class ManagementScene(SceneBase):
 
         for hero in self.state.roster:
             ensure_contract_fields(hero)
+            ensure_progression_fields(hero)
+
+        for hero in self.state.available_contracts:
+            ensure_contract_fields(hero)
+            ensure_progression_fields(hero)
 
         self.recruits_panel.set_items(self.state.available_contracts)
         self.roster_panel.set_items(self.state.roster)
@@ -244,6 +251,8 @@ class ManagementScene(SceneBase):
         )
 
     def draw_recruit_row(self, screen, hero, row_rect, is_selected, is_hovered):
+        ensure_progression_fields(hero)
+
         draw_selectable_row(
             screen=screen,
             rect=row_rect,
@@ -266,8 +275,10 @@ class ManagementScene(SceneBase):
 
         rival_hint = estimate_rival_grade_hint(self.state, hero)
 
-        subclass = hero.subclass or "Base"
-        top_line = f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level} | Age {hero.age}"
+        subclass = hero.primary_subclass or hero.subclass or "Base"
+        phase = career_phase_name(hero)
+
+        top_line = f"{hero.name} | {hero.hero_class}/{subclass} | {phase} | Age {hero.age}"
         screen.blit(
             self.font.render(
                 truncate_text(top_line, self.font, row_rect.width - 420),
@@ -300,10 +311,10 @@ class ManagementScene(SceneBase):
             style="good" if queued else "default",
         ).draw(screen, self.small_font)
 
-        mods = visible_offer_modifiers(self.state, hero, campaigns, signing_fee)
         bottom_line = (
-            f"Offer {signing_fee}g / {campaigns}c | "
-            f"{mods[0]} | {mods[1] if len(mods) > 1 else ''}"
+            f"Pwr {hero.combat_power()} | "
+            f"{career_phase_summary(hero)} | "
+            f"Offer {signing_fee}g / {campaigns}c"
         )
         screen.blit(
             self.small_font.render(
@@ -316,6 +327,7 @@ class ManagementScene(SceneBase):
 
     def draw_roster_row(self, screen, hero, row_rect, is_selected, is_hovered):
         ensure_contract_fields(hero)
+        ensure_progression_fields(hero)
 
         style = "green" if hero.injured_years_remaining <= 0 else "brown"
         if is_expiring_hero(hero):
@@ -329,12 +341,13 @@ class ManagementScene(SceneBase):
             style=style,
         )
 
-        subclass = hero.subclass or "Base"
+        subclass = hero.primary_subclass or hero.subclass or "Base"
+        phase = career_phase_name(hero)
 
         screen.blit(
             self.font.render(
                 truncate_text(
-                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
+                    f"{hero.name} | {hero.hero_class}/{subclass} | {phase}",
                     self.font,
                     row_rect.width - 170,
                 ),
@@ -355,14 +368,12 @@ class ManagementScene(SceneBase):
 
         if is_expiring_hero(hero):
             bottom_line = (
-                f"Age {hero.age} ({hero.career_stage()}) | "
-                f"Pwr {hero.combat_power()} | Renewal due"
+                f"Age {hero.age} | {career_phase_summary(hero)} | Renewal due"
             )
         else:
             bottom_line = (
-                f"Age {hero.age} ({hero.career_stage()}) | "
-                f"Pwr {hero.combat_power()} | "
-                f"Mentor {hero.mentorship_value()} | "
+                f"Age {hero.age} | {career_phase_summary(hero)} | "
+                f"Abilities {len(hero.unlocked_abilities)} | "
                 f"Satisfaction {hero.satisfaction_label()}"
             )
 
@@ -395,6 +406,7 @@ class ManagementScene(SceneBase):
             return
 
         hero = self.selected_hero
+        ensure_progression_fields(hero)
 
         if self.selected_source == "Recruit":
             self.draw_recruit_details(screen, hero)
@@ -424,31 +436,34 @@ class ManagementScene(SceneBase):
         )
         rival_summary = rival_summary_for_hero(self.state, hero)
 
+        subclass_text = ", ".join(hero.unlocked_subclasses) if hero.unlocked_subclasses else (hero.subclass or "None")
+        ability_text = ", ".join(hero.unlocked_abilities) if hero.unlocked_abilities else (hero.special_ability or "None")
+
         left_entries = [
             ("Recruit", hero.name),
             ("Class", hero.hero_class),
-            ("Subclass", hero.subclass or "None"),
-            ("Specialty", hero.specialty),
-            ("Growth", hero.growth_rate),
-            ("Attitude", hero.contract_attitude),
+            ("Age", hero.age),
+            ("Career Phase", career_phase_name(hero)),
+            ("Phase Effect", career_phase_summary(hero)),
+            ("Subclass", subclass_text),
         ]
 
         middle_entries = [
+            ("Abilities", ability_text),
             ("Asking Price", f"{hero.asking_signing_fee}g"),
             ("Preferred Campaigns", hero.preferred_campaigns),
             ("Ask / Campaign", f"{hero.asking_fee_per_campaign}g"),
             ("Draft Offer", f"{self.offer_signing_fee}g / {self.offer_campaigns}c"),
             ("Your Offer Grade", your_grade),
-            ("Rival Offer Grade", rival_hint),
         ]
 
         right_entries = [
+            ("Rival Offer Grade", rival_hint),
             ("Likely Rival", rival_summary["name"]),
             ("Rival Style", rival_summary["style"]),
             ("Rival Tagline", rival_summary["tagline"] or "No tagline"),
             ("Why They Care", rival_summary["reason"]),
             ("Modifiers", ", ".join(modifiers) if modifiers else "No major visible modifiers"),
-            ("Notes", "Money per campaign drives most of the decision."),
         ]
 
         self.draw_text_column(screen, left_entries, left_x, top_y, 260)
@@ -457,23 +472,27 @@ class ManagementScene(SceneBase):
 
     def draw_roster_details(self, screen, hero):
         ensure_contract_fields(hero)
+        ensure_progression_fields(hero)
 
         if is_expiring_hero(hero):
             self.draw_roster_renewal_details(screen, hero)
             return
 
+        subclass_text = ", ".join(hero.unlocked_subclasses) if hero.unlocked_subclasses else (hero.subclass or "None")
+        ability_text = ", ".join(hero.unlocked_abilities) if hero.unlocked_abilities else (hero.special_ability or "None")
+
         left_lines = [
             f"Hero: {hero.name}",
             f"Class: {hero.hero_class}",
-            f"Subclass: {hero.subclass or 'None'}",
-            f"Ability: {hero.special_ability or 'None'}",
-            f"Specialty: {hero.specialty}",
-            f"Growth: {hero.growth_rate}",
+            f"Age: {hero.age}",
+            f"Career Phase: {career_phase_name(hero)}",
+            f"Phase Effect: {career_phase_summary(hero)}",
+            f"Subclasses: {subclass_text}",
         ]
 
         right_lines = [
+            f"Abilities: {ability_text}",
             f"Power: {hero.combat_power()}",
-            f"Age: {hero.age} ({hero.career_stage()})",
             f"Mentorship: {hero.mentorship_value()}",
             f"Satisfaction: {hero.satisfaction}/100 ({hero.satisfaction_label()})",
             f"Retire Risk: {hero.retirement_chance() * 100:.1f}%",
@@ -516,25 +535,30 @@ class ManagementScene(SceneBase):
             self.offer_signing_fee,
         )
 
+        subclass_text = ", ".join(hero.unlocked_subclasses) if hero.unlocked_subclasses else (hero.subclass or "None")
+        ability_text = ", ".join(hero.unlocked_abilities) if hero.unlocked_abilities else (hero.special_ability or "None")
+
         left_entries = [
             ("Hero", hero.name),
             ("Renewal State", "Expiring"),
             ("Class", hero.hero_class),
-            ("Subclass", hero.subclass or "None"),
-            ("Satisfaction", f"{hero.satisfaction}/100 ({hero.satisfaction_label()})"),
-            ("Mentorship", hero.mentorship_value()),
+            ("Age", hero.age),
+            ("Career Phase", career_phase_name(hero)),
+            ("Phase Effect", career_phase_summary(hero)),
         ]
 
         middle_entries = [
+            ("Subclass", subclass_text),
+            ("Abilities", ability_text),
+            ("Satisfaction", f"{hero.satisfaction}/100 ({hero.satisfaction_label()})"),
             ("Renewal Ask", f"{ask_fee}g / {ask_campaigns}c"),
             ("Draft Renewal", f"{self.offer_signing_fee}g / {self.offer_campaigns}c"),
             ("Renewal Grade", renewal_grade),
-            ("Renewal Risk", risk_label),
-            ("Age", f"{hero.age} ({hero.career_stage()})"),
-            ("Contract Remaining", f"{hero.contract_years} campaign(s)"),
         ]
 
         right_entries = [
+            ("Renewal Risk", risk_label),
+            ("Contract Remaining", f"{hero.contract_years} campaign(s)"),
             ("Modifiers", ", ".join(modifiers) if modifiers else "No major visible modifiers"),
             ("Queue Rules", "Queued renewals resolve when the current contract expires."),
             ("Failure Result", "No accepted renewal means the hero returns to the recruit market."),

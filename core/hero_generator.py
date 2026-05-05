@@ -6,15 +6,64 @@ from data_loader import load_hero_generation_rules, load_hero_names
 from growth_rates import random_growth_rate
 from hero_specialties import random_specialty_for_class
 from models import Hero
+from systems.hero_career import CAREER_PHASES_BY_CLASS, career_phase_name
+from systems.hero_progression import (
+    CLASS_TRAINING_PATHS,
+    available_training_paths,
+    ensure_progression_fields,
+    spend_training_point,
+)
+
+
+RECRUIT_PHASE_WEIGHTS_BY_CLASS: Dict[str, Dict[str, int]] = {
+    "Rogue": {
+        "Rookie": 46,
+        "Rising": 30,
+        "Prime": 16,
+        "Veteran": 6,
+        "Elder": 2,
+    },
+    "Warrior": {
+        "Rookie": 42,
+        "Rising": 30,
+        "Prime": 18,
+        "Veteran": 8,
+        "Elder": 2,
+    },
+    "Cleric": {
+        "Rookie": 40,
+        "Rising": 28,
+        "Prime": 20,
+        "Veteran": 9,
+        "Elder": 3,
+    },
+    "Mage": {
+        "Rookie": 38,
+        "Rising": 28,
+        "Prime": 21,
+        "Veteran": 10,
+        "Elder": 3,
+    },
+}
+
+DEVELOPMENTAL_PHASE_WEIGHTS_BY_CLASS: Dict[str, Dict[str, int]] = {
+    "Rogue": {"Rookie": 80, "Rising": 20},
+    "Warrior": {"Rookie": 82, "Rising": 18},
+    "Cleric": {"Rookie": 86, "Rising": 14},
+    "Mage": {"Rookie": 90, "Rising": 10},
+}
 
 
 def weighted_choice(weight_map: Dict[str, int]) -> str:
-    total = sum(int(weight) for weight in weight_map.values())
+    total = sum(max(0, int(weight)) for weight in weight_map.values())
+    if total <= 0:
+        return next(iter(weight_map))
+
     roll = random.randint(1, total)
     running = 0
 
     for value, weight in weight_map.items():
-        running += int(weight)
+        running += max(0, int(weight))
         if roll <= running:
             return value
 
@@ -34,9 +83,85 @@ def generate_name(existing_names: Set[str]) -> str:
     return f"{random.choice(first_names)} {random.choice(titles)} {random.randint(100, 999)}"
 
 
+def phase_age_range_for_class(class_name: str, phase_name: str) -> tuple[int, int]:
+    phase_table = CAREER_PHASES_BY_CLASS.get(class_name, [])
+    for name, min_age, max_age in phase_table:
+        if name != phase_name:
+            continue
+
+        low = int(min_age)
+        high = int(max_age) if max_age is not None else (low + 8)
+        return low, max(low, high)
+
+    return 18, 24
+
+
+def choose_phase_for_new_recruit(class_name: str, developmental: bool = False) -> str:
+    if developmental:
+        weights = DEVELOPMENTAL_PHASE_WEIGHTS_BY_CLASS.get(
+            class_name,
+            {"Rookie": 85, "Rising": 15},
+        )
+        return weighted_choice(weights)
+
+    weights = RECRUIT_PHASE_WEIGHTS_BY_CLASS.get(
+        class_name,
+        {
+            "Rookie": 42,
+            "Rising": 28,
+            "Prime": 18,
+            "Veteran": 9,
+            "Elder": 3,
+        },
+    )
+    return weighted_choice(weights)
+
+
+def choose_age_for_phase(class_name: str, phase_name: str) -> int:
+    low, high = phase_age_range_for_class(class_name, phase_name)
+    return random.randint(low, high)
+
+
+def level_range_for_phase(class_name: str, phase_name: str) -> tuple[int, int]:
+    if class_name == "Rogue":
+        table = {
+            "Rookie": (1, 2),
+            "Rising": (2, 4),
+            "Prime": (4, 6),
+            "Veteran": (4, 6),
+            "Elder": (3, 5),
+        }
+    elif class_name == "Warrior":
+        table = {
+            "Rookie": (1, 2),
+            "Rising": (2, 4),
+            "Prime": (4, 6),
+            "Veteran": (4, 6),
+            "Elder": (3, 5),
+        }
+    elif class_name == "Cleric":
+        table = {
+            "Rookie": (1, 2),
+            "Rising": (2, 4),
+            "Prime": (4, 6),
+            "Veteran": (4, 7),
+            "Elder": (4, 7),
+        }
+    else:  # Mage
+        table = {
+            "Rookie": (1, 2),
+            "Rising": (2, 4),
+            "Prime": (4, 7),
+            "Veteran": (4, 7),
+            "Elder": (4, 7),
+        }
+
+    return table.get(phase_name, (1, 2))
+
+
 def scale_stats_for_level(stats: Dict[str, int], level: int, hero_class: str) -> Dict[str, int]:
     if level <= 1:
-        return stats
+        return dict(stats)
 
     primary_stats = {
         "Warrior": ["might"],
@@ -49,7 +174,7 @@ def scale_stats_for_level(stats: Dict[str, int], level: int, hero_class: str) ->
 
     for _ in range(level - 1):
         for stat in primary_stats:
-            scaled[stat] = scaled.get(stat, 0) + 2
+            scaled[stat] = scaled.get(stat, 0) + 1
 
         random_stat = random.choice(["might", "agility", "mind", "spirit"])
         scaled[random_stat] = scaled.get(random_stat, 0) + 1
@@ -67,15 +192,15 @@ def base_combat_power(hero_class: str, level: int, stats: Dict[str, int]) -> int
 
     secondary = {
         "Warrior": ["spirit"],
-        "Rogue": ["might"],
+        "Rogue": ["mind"],
         "Cleric": ["mind"],
         "Mage": ["spirit"],
     }.get(hero_class, [])
 
-    primary_power = sum(stats.get(stat, 0) * 3 for stat in primary)
-    secondary_power = sum(stats.get(stat, 0) * 2 for stat in secondary)
+    primary_power = sum(stats.get(stat, 0) * 2 for stat in primary)
+    secondary_power = sum(stats.get(stat, 0) * 1 for stat in secondary)
     general_power = sum(stats.values())
-    return max(1, primary_power + secondary_power + general_power + level * 5)
+    return max(1, primary_power + secondary_power + general_power + level * 3)
 
 
 def calculate_contract_values(
@@ -159,20 +284,16 @@ def choose_class_for_state(rules: Dict, state) -> str:
     return random.choice(valid_classes)
 
 
-def choose_level_for_state(class_rules: Dict, state) -> int:
+def choose_level_for_phase(class_rules: Dict, state, class_name: str, phase_name: str) -> int:
     level_cap = getattr(state.guild_upgrades, "recruit_level_cap", 1)
-    level_weights = class_rules.get("level_weights", {"1": 1})
+    low, high = level_range_for_phase(class_name, phase_name)
+    high = min(high, level_cap)
+    low = min(low, high)
 
-    capped_weights = {
-        level: weight
-        for level, weight in level_weights.items()
-        if int(level) <= level_cap
-    }
+    if high < 1:
+        return 1
 
-    if not capped_weights:
-        capped_weights = {"1": 1}
-
-    return int(weighted_choice(capped_weights))
+    return random.randint(max(1, low), max(1, high))
 
 
 def market_tier_for_hero(hero: Hero, developmental: bool = False) -> str:
@@ -188,12 +309,13 @@ def market_tier_for_hero(hero: Hero, developmental: bool = False) -> str:
         "Mythic": 5,
     }.get(hero.growth_rate, 1)
 
-    if hero.level >= 5 or growth_rank >= 4:
+    unlocked_count = len(getattr(hero, "unlocked_subclasses", []) or [])
+
+    if hero.level >= 6 or growth_rank >= 4 or unlocked_count >= 2:
         return "Elite"
-    if hero.level >= 3 or growth_rank >= 3:
+    if hero.level >= 4 or growth_rank >= 3 or unlocked_count >= 1:
         return "Premium"
     return "Standard"
-
 
 def assign_negotiation_profile(hero: Hero, developmental: bool = False) -> Hero:
     attitude_profiles = {
@@ -243,24 +365,49 @@ def assign_negotiation_profile(hero: Hero, developmental: bool = False) -> Hero:
 
     preferred_campaigns = max(1, hero.contract_years)
     asking_signing_fee = max(25, hero.signing_bonus)
-    asking_fee_per_campaign = max(10, int(round(asking_signing_fee / preferred_campaigns)))
 
-    if hero.age <= 24:
-        preferred_campaigns = max(preferred_campaigns, 3)
+    phase = career_phase_name(hero)
+
+    if phase == "Rookie":
+        preferred_campaigns = max(3, min(preferred_campaigns, 5))
+        asking_signing_fee = max(25, int(asking_signing_fee * 0.78))
+        profile["development_weight"] += 0.04
+        profile["mentorship_weight"] += 0.03
+        profile["money_per_campaign_weight"] = max(0.62, profile["money_per_campaign_weight"] - 0.05)
+
+    elif phase == "Rising":
+        preferred_campaigns = max(3, min(preferred_campaigns, 5))
+        asking_signing_fee = max(25, int(asking_signing_fee * 0.92))
         profile["development_weight"] += 0.02
-        profile["mentorship_weight"] += 0.02
 
-    if hero.age >= 38:
-        preferred_campaigns = max(1, preferred_campaigns - 1)
+    elif phase == "Prime":
+        preferred_campaigns = max(2, min(preferred_campaigns, 4))
+        asking_signing_fee = max(25, int(asking_signing_fee * 1.08))
+        profile["reputation_weight"] += 0.02
+
+    elif phase == "Veteran":
+        preferred_campaigns = min(preferred_campaigns, 3)
+        asking_signing_fee = max(25, int(asking_signing_fee * 0.92))
         profile["safety_weight"] += 0.03
         profile["reputation_weight"] += 0.03
 
+    elif phase == "Elder":
+        preferred_campaigns = min(preferred_campaigns, 2)
+        asking_signing_fee = max(25, int(asking_signing_fee * 0.78))
+        profile["safety_weight"] += 0.05
+        profile["reputation_weight"] += 0.04
+        profile["money_per_campaign_weight"] = min(0.88, profile["money_per_campaign_weight"] + 0.04)
+
+    if hero.age <= 24:
+        preferred_campaigns = max(preferred_campaigns, 3)
+
     if developmental:
         preferred_campaigns = max(2, min(preferred_campaigns, 4))
-        asking_signing_fee = max(25, int(asking_signing_fee * 0.55))
-        asking_fee_per_campaign = max(10, int(round(asking_signing_fee / preferred_campaigns)))
+        asking_signing_fee = max(25, int(asking_signing_fee * 0.70))
         profile["development_weight"] += 0.05
-        profile["money_per_campaign_weight"] = max(0.64, profile["money_per_campaign_weight"] - 0.06)
+        profile["money_per_campaign_weight"] = max(0.60, profile["money_per_campaign_weight"] - 0.06)
+
+    asking_fee_per_campaign = max(10, int(round(asking_signing_fee / preferred_campaigns)))
 
     hero.preferred_campaigns = preferred_campaigns
     hero.asking_signing_fee = asking_signing_fee
@@ -277,14 +424,97 @@ def assign_negotiation_profile(hero: Hero, developmental: bool = False) -> Hero:
     hero.market_tier = market_tier_for_hero(hero, developmental=developmental)
     return hero
 
+def _path_names_for_hero(hero) -> List[str]:
+    return list(available_training_paths(hero).keys())
+
+
+def _apply_training_steps(hero, steps: int) -> None:
+    ensure_progression_fields(hero)
+    steps = max(0, int(steps))
+
+    path_names = _path_names_for_hero(hero)
+    if not path_names or steps <= 0:
+        return
+
+    hero.training_points += steps
+
+    for _ in range(steps):
+        candidates = [
+            path_name
+            for path_name in path_names
+            if hero.training_path_progress.get(path_name, 0)
+            < len(CLASS_TRAINING_PATHS[hero.hero_class][path_name]["ranks"])
+        ]
+        if not candidates:
+            break
+
+        weights = []
+        phase = career_phase_name(hero)
+        for path_name in candidates:
+            weight = 1
+            lowered = path_name.lower()
+
+            if hero.hero_class == "Warrior":
+                if phase in ("Rising", "Prime") and lowered in ("vanguard", "warden"):
+                    weight += 2
+                if phase in ("Veteran", "Elder") and lowered == "captain":
+                    weight += 2
+            elif hero.hero_class == "Rogue":
+                if phase in ("Rookie", "Rising") and lowered == "scout":
+                    weight += 2
+                if phase in ("Prime", "Veteran") and lowered in ("fixer", "shadow"):
+                    weight += 2
+            elif hero.hero_class == "Cleric":
+                if phase in ("Rising", "Prime") and lowered in ("templar", "shepherd"):
+                    weight += 2
+                if phase in ("Veteran", "Elder") and lowered == "oracle":
+                    weight += 2
+            elif hero.hero_class == "Mage":
+                if phase in ("Rising", "Prime") and lowered == "arcanist":
+                    weight += 2
+                if phase in ("Veteran", "Elder") and lowered in ("seer", "spellblade"):
+                    weight += 2
+
+            if hero.training_path_progress.get(path_name, 0) == 0:
+                weight += 1
+
+            weights.append(weight)
+
+        chosen_path = random.choices(candidates, weights=weights, k=1)[0]
+        spend_training_point(hero, chosen_path)
+
+
+def _prior_development_steps_for_hero(hero) -> int:
+    phase = career_phase_name(hero)
+
+    if phase == "Rookie":
+        return 0
+
+    if phase == "Rising":
+        return random.randint(0, 1)
+
+    if phase == "Prime":
+        return random.randint(1, 3)
+
+    if phase == "Veteran":
+        return random.randint(2, 4)
+
+    if phase == "Elder":
+        if hero.hero_class == "Rogue":
+            return random.randint(1, 3)
+        return random.randint(3, 5)
+
+    return 0
+
 
 def generate_hero(existing_names: Set[str], state) -> Hero:
     rules = load_hero_generation_rules()
     class_name = choose_class_for_state(rules, state)
     class_rules = rules["classes"][class_name]
 
-    age = random.randint(class_rules["age_min"], class_rules["age_max"])
-    level = choose_level_for_state(class_rules, state)
+    phase_name = choose_phase_for_new_recruit(class_name, developmental=False)
+    age = choose_age_for_phase(class_name, phase_name)
+    level = choose_level_for_phase(class_rules, state, class_name, phase_name)
 
     stats = {}
     for stat, stat_range in class_rules["stat_ranges"].items():
@@ -320,28 +550,69 @@ def generate_hero(existing_names: Set[str], state) -> Hero:
         contract_attitude=contract_attitude,
     )
 
+    ensure_progression_fields(hero)
+    _apply_training_steps(hero, _prior_development_steps_for_hero(hero))
+
     apply_reputation_to_contract(hero, state.reputation)
     assign_negotiation_profile(hero, developmental=False)
     return hero
 
 
 def generate_developmental_hero(existing_names: Set[str], state) -> Hero:
-    hero = generate_hero(existing_names, state)
+    rules = load_hero_generation_rules()
+    class_name = choose_class_for_state(rules, state)
+    class_rules = rules["classes"][class_name]
 
-    hero.age = random.randint(18, 24)
-    hero.level = 1
-    hero.xp = 0
-    hero.contract_years = random.randint(2, 4)
+    phase_name = choose_phase_for_new_recruit(class_name, developmental=True)
+    age = choose_age_for_phase(class_name, phase_name)
+    level = 1 if phase_name == "Rookie" else 2
+    level = min(level, getattr(state.guild_upgrades, "recruit_level_cap", 1))
 
-    hero.growth_rate = random.choices(
-        ["Mundane", "Talented", "Gifted"],
-        weights=[25, 55, 20],
-        k=1,
-    )[0]
+    stats = {}
+    for stat, stat_range in class_rules["stat_ranges"].items():
+        stats[stat] = random.randint(int(stat_range[0]), int(stat_range[1]))
 
-    hero.signing_bonus = max(25, int(hero.signing_bonus * 0.50))
-    hero.wage_per_year = max(1, int(hero.wage_per_year * 0.60))
+    stats = scale_stats_for_level(stats, level, class_name)
 
+    contract_attitude = random_contract_attitude()
+    signing_bonus, wage_per_year = calculate_contract_values(
+        hero_class=class_name,
+        age=age,
+        level=level,
+        stats=stats,
+        contract_attitude=contract_attitude,
+        reputation=state.reputation,
+    )
+
+    hero = Hero(
+        name=generate_name(existing_names),
+        hero_class=class_name,
+        age=age,
+        level=level,
+        xp=0,
+        stats=stats,
+        signing_bonus=max(25, int(signing_bonus * 0.55)),
+        wage_per_year=max(1, int(wage_per_year * 0.60)),
+        contract_years=random.randint(2, 4),
+        specialty=random_specialty_for_class(class_name),
+        growth_rate=random.choices(
+            ["Mundane", "Talented", "Gifted"],
+            weights=[25, 55, 20],
+            k=1,
+        )[0],
+        contract_attitude=contract_attitude,
+    )
+
+    ensure_progression_fields(hero)
+    hero.training_points = 0
+    hero.training_path_progress = {}
+    hero.unlocked_subclasses = []
+    hero.unlocked_abilities = []
+    hero.primary_subclass = None
+    hero.subclass = None
+    hero.special_ability = None
+
+    apply_reputation_to_contract(hero, state.reputation)
     assign_negotiation_profile(hero, developmental=True)
     return hero
 
@@ -382,7 +653,31 @@ def generate_contract_market(
             existing_names.add(hero.name)
             generated.append(hero)
 
-    random.shuffle(generated)
+    tier_rank = {
+        "Elite": 0,
+        "Premium": 1,
+        "Standard": 2,
+        "Developmental": 3,
+    }
+
+    phase_rank = {
+        "Prime": 0,
+        "Rising": 1,
+        "Veteran": 2,
+        "Rookie": 3,
+        "Elder": 4,
+    }
+
+    generated.sort(
+        key=lambda hero: (
+            tier_rank.get(getattr(hero, "market_tier", "Standard"), 9),
+            phase_rank.get(career_phase_name(hero), 9),
+            -int(getattr(hero, "level", 1)),
+            -len(getattr(hero, "unlocked_subclasses", []) or []),
+            int(getattr(hero, "age", 18)),
+        )
+    )
+
     return generated
 
 

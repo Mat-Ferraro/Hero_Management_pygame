@@ -13,6 +13,7 @@ from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from pygame_ui.widgets.scrollable_text_panel import ScrollableTextPanel
+from systems.hero_career import career_phase_name, career_phase_summary
 from systems.hero_progression import ensure_progression_fields
 from systems.training_system import (
     can_specialize_hero,
@@ -153,11 +154,12 @@ class TrainingScene(SceneBase):
         )
 
         subclass = hero.primary_subclass or hero.subclass or "Base"
+        phase = career_phase_name(hero)
 
         screen.blit(
             self.font.render(
                 truncate_text(
-                    f"{hero.name} | {hero.hero_class}/{subclass} | Lv {hero.level}",
+                    f"{hero.name} | {hero.hero_class}/{subclass} | {phase}",
                     self.font,
                     row_rect.width - 340,
                 ),
@@ -175,7 +177,7 @@ class TrainingScene(SceneBase):
 
         StatusChip(
             rect=(row_rect.right - 226, row_rect.y + 10, 102, 26),
-            text=f"XP {hero.xp}",
+            text=f"Age {hero.age}",
             style="info",
         ).draw(screen, self.small_font)
 
@@ -186,8 +188,8 @@ class TrainingScene(SceneBase):
         ).draw(screen, self.small_font)
 
         detail = (
-            f"Age {hero.age} ({hero.career_stage()}) | "
-            f"Pwr {hero.combat_power()} | Mentor {hero.mentorship_value()} | "
+            f"Pwr {hero.combat_power()} | "
+            f"{career_phase_summary(hero)} | "
             f"Subclasses {len(hero.unlocked_subclasses)}"
         )
 
@@ -243,15 +245,17 @@ class TrainingScene(SceneBase):
         left_lines = [
             f"Hero: {hero.name}",
             f"Class: {hero.hero_class}",
-            f"Primary: {hero.primary_subclass or hero.subclass or 'None'}",
+            f"Age: {hero.age}",
+            f"Career Phase: {career_phase_name(hero)}",
+            f"Phase Effect: {career_phase_summary(hero)}",
             f"Status: {'Ready' if allowed else reason}",
-            f"Training Points: {hero.training_points}",
         ]
 
         right_lines = [
             f"Level: {hero.level}",
             f"XP: {hero.xp}/{hero.xp_to_next_level()}",
             f"Power: {hero.combat_power()}",
+            f"Training Points: {hero.training_points}",
             f"Subclasses: {subclass_text}",
             f"Abilities: {ability_text}",
         ]
@@ -279,12 +283,12 @@ class TrainingScene(SceneBase):
             left_lines = [
                 "Heroes gain training points from missions.",
                 "Specialization spends training points.",
-                "Select a hero to inspect available paths.",
+                "Career phase now affects mission performance.",
             ]
             right_lines = [
-                "At Training Hall Lv 3, heroes can begin specializing.",
-                "Each path grants stats and unlocks a subclass at rank 3.",
-                "Heroes can unlock multiple subclasses over time.",
+                "Rogues peak earlier. Mages peak later.",
+                "Older heroes may decline in speed but improve in insight.",
+                "Select a hero to inspect available paths.",
             ]
             y = self.footer_panel.rect.y + 54
 
@@ -314,6 +318,7 @@ class TrainingScene(SceneBase):
         left_lines = [
             "Specialization spends training points.",
             f"Training Points Available: {hero.training_points}",
+            f"Career Phase: {career_phase_name(hero)}",
             f"Unlocked Subclasses: {unlocked_subclasses}",
         ]
 
@@ -353,7 +358,7 @@ class TrainingScene(SceneBase):
             max_width=500,
         )
 
-        abilities_y = y + 92
+        abilities_y = y + 116
         TextBlock(
             lines=[f"Unlocked Abilities: {unlocked_abilities}"],
             color=theme.TEXT_SECONDARY,
@@ -368,8 +373,7 @@ class TrainingScene(SceneBase):
 
         section_x = self.footer_panel.rect.x + 520
         section_y = self.footer_panel.rect.y + 54
-        title = self.font.render("Choose a Path", True, theme.TEXT_PRIMARY)
-        screen.blit(title, (section_x, section_y))
+        screen.blit(self.font.render("Choose a Path", True, theme.TEXT_PRIMARY), (section_x, section_y))
 
         for path_name in paths.keys():
             rect = self.path_button_rect(path_name)
@@ -408,9 +412,7 @@ class TrainingScene(SceneBase):
                 )
 
     def build_buttons(self):
-        buttons = [
-            hub_button(self.on_return_to_hub),
-        ]
+        buttons = [hub_button(self.on_return_to_hub)]
 
         if self.selected_hero and self.state.guild_upgrades.training_hall_level >= 3:
             if self.selected_path_name:

@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 
 from hero_generator import generate_fallback_contract_market
 from manager_reputation import CLASS_REPUTATION_KEYS
+from systems.hero_career import career_phase_name
 from systems.rival_guilds import (
     add_hero_to_rival_guild,
     add_market_history_entry,
@@ -79,20 +80,68 @@ def get_renewal_offer_for_hero(state, hero) -> Optional[Dict]:
     return None
 
 
-def default_offer_for_hero(hero) -> Dict:
-    ensure_hero_profile(hero)
-    return {
-        "hero_name": hero.name,
-        "offered_campaigns": int(hero.preferred_campaigns),
-        "offered_signing_fee": int(hero.asking_signing_fee),
-    }
-
-
 def class_reputation_score(state, hero) -> int:
     key = CLASS_REPUTATION_KEYS.get(hero.hero_class)
     if not key:
         return 0
     return getattr(state.reputation, key, 0)
+
+
+def phase_signing_multiplier(hero) -> float:
+    phase = career_phase_name(hero)
+
+    if phase == "Rookie":
+        return 0.82
+    if phase == "Rising":
+        return 0.95
+    if phase == "Prime":
+        return 1.15
+    if phase == "Veteran":
+        return 0.96
+    if phase == "Elder":
+        return 0.82
+
+    return 1.0
+
+
+def phase_term_preference(hero) -> int:
+    phase = career_phase_name(hero)
+
+    if phase == "Rookie":
+        return 4
+    if phase == "Rising":
+        return 3
+    if phase == "Prime":
+        return 3
+    if phase == "Veteran":
+        return 2
+    if phase == "Elder":
+        return 1
+
+    return 3
+
+
+def tier_score_bonus(hero) -> float:
+    tier = getattr(hero, "market_tier", "Standard")
+    return {
+        "Developmental": -8.0,
+        "Standard": 0.0,
+        "Premium": 8.0,
+        "Elite": 14.0,
+    }.get(tier, 0.0)
+
+
+def default_offer_for_hero(hero) -> Dict:
+    ensure_hero_profile(hero)
+
+    campaigns = max(1, int(getattr(hero, "preferred_campaigns", 3)))
+    signing_fee = max(25, int(getattr(hero, "asking_signing_fee", 100)))
+
+    return {
+        "hero_name": hero.name,
+        "offered_campaigns": campaigns,
+        "offered_signing_fee": signing_fee,
+    }
 
 
 def renewal_loyalty_modifier(hero) -> float:
@@ -107,26 +156,32 @@ def renewal_loyalty_modifier(hero) -> float:
         return 1.12
     return 1.0
 
-
 def renewal_term_preference(hero) -> int:
     preferred = max(1, int(getattr(hero, "preferred_campaigns", 3)))
-    age = int(getattr(hero, "age", 25))
     attitude = getattr(hero, "contract_attitude", "Practical")
+    phase = career_phase_name(hero)
+    phase_preference = phase_term_preference(hero)
 
-    if age >= 38:
-        preferred = max(1, preferred - 1)
-    elif age <= 24:
+    preferred = min(preferred, max(1, phase_preference))
+
+    if phase == "Elder":
+        preferred = 1
+    elif phase == "Veteran":
+        preferred = min(preferred, 2)
+    elif phase == "Rookie":
         preferred = max(preferred, 3)
 
     if attitude == "Mercenary":
         preferred = max(1, preferred - 1)
     elif attitude in ("Practical", "Modest"):
-        preferred = max(preferred, 2)
+        preferred = max(preferred, 2 if phase != "Elder" else 1)
     elif attitude in ("Ambitious", "Noble"):
-        preferred = max(preferred, 3)
+        if phase in ("Rookie", "Rising", "Prime"):
+            preferred = max(preferred, 3)
+        else:
+            preferred = min(preferred, 2)
 
-    return preferred
-
+    return max(1, preferred)
 
 def renewal_ask_for_hero(state, hero) -> Tuple[int, int]:
     ensure_hero_profile(hero)
@@ -136,6 +191,7 @@ def renewal_ask_for_hero(state, hero) -> Tuple[int, int]:
 
     overall_rep = int(getattr(state.reputation, "overall", 0))
     class_rep = int(class_reputation_score(state, hero))
+    phase = career_phase_name(hero)
 
     signing_fee = int(signing_fee * renewal_loyalty_modifier(hero))
 
@@ -149,8 +205,18 @@ def renewal_ask_for_hero(state, hero) -> Tuple[int, int]:
     elif class_rep <= -35:
         signing_fee = int(signing_fee * 1.08)
 
-    return max(1, campaigns), max(25, signing_fee)
+    if phase == "Rookie":
+        signing_fee = int(signing_fee * 0.92)
+    elif phase == "Rising":
+        signing_fee = int(signing_fee * 0.98)
+    elif phase == "Prime":
+        signing_fee = int(signing_fee * 1.05)
+    elif phase == "Veteran":
+        signing_fee = int(signing_fee * 0.94)
+    elif phase == "Elder":
+        signing_fee = int(signing_fee * 0.82)
 
+    return max(1, campaigns), max(25, signing_fee)
 
 def default_renewal_offer_for_hero(state, hero) -> Dict:
     campaigns, signing_fee = renewal_ask_for_hero(state, hero)
@@ -273,13 +339,16 @@ def offer_score_components(state, hero, campaigns: int, signing_fee: int) -> Dic
     ensure_hero_profile(hero)
 
     offered_fee_per_campaign = signing_fee / max(1, campaigns)
-    asking_fee_per_campaign = max(10, float(hero.asking_fee_per_campaign))
+    asking_fee_per_campaign = max(10.0, float(hero.asking_fee_per_campaign))
 
     money_delta = (offered_fee_per_campaign - asking_fee_per_campaign) / asking_fee_per_campaign
     money_component = max(-35.0, min(35.0, money_delta * 65.0)) * float(hero.money_per_campaign_weight)
 
     preferred_campaigns = max(1, int(hero.preferred_campaigns))
-    campaign_gap = abs(campaigns - preferred_campaigns)
+    phase_preference = phase_term_preference(hero)
+    ideal_campaigns = max(1, min(preferred_campaigns, phase_preference))
+
+    campaign_gap = abs(campaigns - ideal_campaigns)
     term_component = max(-10.0, 8.0 - (campaign_gap * 4.5)) * float(hero.term_weight)
 
     overall_rep = getattr(state.reputation, "overall", 0)
@@ -293,11 +362,30 @@ def offer_score_components(state, hero, campaigns: int, signing_fee: int) -> Dic
     safety_component = max(-6.0, min(6.0, safety / 12.0)) * float(hero.safety_weight)
 
     development_source = development
-    if hero.age <= 24 or getattr(hero, "is_developmental", False):
-        development_source += 10
-    development_component = max(-6.0, min(8.0, development_source / 10.0)) * float(hero.development_weight)
+    if career_phase_name(hero) == "Rookie" or getattr(hero, "is_developmental", False):
+        development_source += 12
+    elif career_phase_name(hero) == "Rising":
+        development_source += 6
+    elif career_phase_name(hero) == "Elder":
+        development_source -= 4
 
+    development_component = max(-6.0, min(8.0, development_source / 10.0)) * float(hero.development_weight)
     mentorship_component = mentorship_bonus(state, hero) * float(hero.mentorship_weight)
+
+    phase_component = 0.0
+    phase = career_phase_name(hero)
+    if phase == "Rookie":
+        phase_component -= 3.0
+    elif phase == "Rising":
+        phase_component += 2.0
+    elif phase == "Prime":
+        phase_component += 6.0
+    elif phase == "Veteran":
+        phase_component += 1.0
+    elif phase == "Elder":
+        phase_component -= 2.0
+
+    tier_component = tier_score_bonus(hero)
 
     return {
         "money_per_campaign": money_component,
@@ -306,6 +394,8 @@ def offer_score_components(state, hero, campaigns: int, signing_fee: int) -> Dic
         "safety": safety_component,
         "development": development_component,
         "mentorship": mentorship_component,
+        "phase": phase_component,
+        "tier": tier_component,
     }
 
 
@@ -377,6 +467,8 @@ def rival_guild_for_hero(state, hero) -> Optional[Dict]:
         return None
 
     weights = []
+    phase = career_phase_name(hero)
+
     for guild in guild_pool:
         weight = 10 + guild.get("aggression", 0) + max(0, guild.get("wealth_bias", 0))
 
@@ -388,8 +480,18 @@ def rival_guild_for_hero(state, hero) -> Optional[Dict]:
         else:
             weight += max(0, guild.get("prestige", 0) // 2)
 
-        if getattr(hero, "market_tier", "Standard") == "Elite":
-            weight += max(0, guild.get("prestige", 0))
+        tier = getattr(hero, "market_tier", "Standard")
+        if tier == "Elite":
+            weight += max(0, guild.get("prestige", 0)) + 8
+        elif tier == "Premium":
+            weight += max(0, guild.get("prestige", 0) // 2) + 4
+
+        if phase == "Prime":
+            weight += 5
+        elif phase == "Veteran":
+            weight += 2
+        elif phase == "Elder":
+            weight -= 2
 
         weights.append(max(1, weight))
 
@@ -428,11 +530,19 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
         return None
 
     tier_bonus = {
-        "Developmental": -16,
+        "Developmental": -14,
         "Standard": 0,
-        "Premium": 8,
-        "Elite": 16,
+        "Premium": 10,
+        "Elite": 18,
     }.get(getattr(hero, "market_tier", "Standard"), 0)
+
+    phase_bonus = {
+        "Rookie": -4,
+        "Rising": 3,
+        "Prime": 9,
+        "Veteran": 2,
+        "Elder": -3,
+    }.get(career_phase_name(hero), 0)
 
     seed = f"{guild['name']}:{hero.name}:{getattr(state, 'contract_round', 1)}:{state.year}"
     rng = random.Random(seed)
@@ -445,11 +555,16 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
     else:
         interest_threshold = 0.15 - (max(0, guild.get("aggression", 0)) / 100.0)
 
+    if career_phase_name(hero) == "Prime":
+        interest_threshold -= 0.05
+    elif career_phase_name(hero) == "Elder":
+        interest_threshold += 0.06
+
     interest_threshold = max(0.02, min(0.85, interest_threshold))
     if interest_roll < interest_threshold:
         return None
 
-    base = 56.0 + tier_bonus + rng.randint(-7, 7)
+    base = 56.0 + tier_bonus + phase_bonus + rng.randint(-7, 7)
     base += guild.get("wealth_bias", 0) * 0.9
     base += guild.get("aggression", 0) * 0.45
     base += guild.get("prestige", 0) * 0.35
@@ -504,6 +619,14 @@ def visible_offer_modifiers(state, hero, campaigns: int, signing_fee: int) -> Li
 
     if components["development"] >= 1:
         lines.append("+ Good development path")
+
+    if components["phase"] >= 5:
+        lines.append("+ Proven in prime years")
+    elif components["phase"] <= -2:
+        lines.append("- Phase reduces urgency")
+
+    if components["tier"] >= 8:
+        lines.append("+ High market status")
 
     if not lines:
         lines.append("No major visible modifiers")

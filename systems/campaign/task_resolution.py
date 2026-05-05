@@ -3,28 +3,26 @@ from __future__ import annotations
 from typing import Dict, List
 
 from systems.hero_abilities import apply_party_ability_modifiers
+from systems.hero_career import effective_stat
 
 DISPATCH_STATS = ["might", "guard", "wit", "presence", "swift"]
-
-
-def safe_total_stat(hero, stat_name: str) -> int:
-    try:
-        value = hero.total_stat(stat_name)
-        return max(0, int(value))
-    except Exception:
-        return max(0, int(getattr(hero, "stats", {}).get(stat_name, 0)))
 
 
 def hero_dispatch_stats(hero) -> Dict[str, int]:
     hero_class = getattr(hero, "hero_class", "")
     subclass = (getattr(hero, "subclass", None) or "").lower()
 
+    might_value = effective_stat(hero, "might")
+    agility_value = effective_stat(hero, "agility")
+    mind_value = effective_stat(hero, "mind")
+    spirit_value = effective_stat(hero, "spirit")
+
     stats = {
-        "might": safe_total_stat(hero, "might"),
-        "guard": max(0, int(round((safe_total_stat(hero, "might") + safe_total_stat(hero, "spirit")) / 2))),
-        "wit": safe_total_stat(hero, "mind"),
-        "presence": safe_total_stat(hero, "spirit"),
-        "swift": safe_total_stat(hero, "agility"),
+        "might": might_value,
+        "guard": max(0, int(round((might_value + spirit_value) / 2))),
+        "wit": mind_value,
+        "presence": spirit_value,
+        "swift": agility_value,
     }
 
     if hero_class == "Warrior":
