@@ -1,6 +1,6 @@
 from typing import List
 
-from game_state import GameState
+from core.game_state import GameState
 from manager_reputation import reputation_for_level_up
 from models import Dungeon, Hero
 from .room_system import choose_room_option, print_room_result, resolve_room
@@ -98,7 +98,7 @@ def finish_expedition(state: GameState, dungeon: Dungeon) -> List[str]:
     )
     messages.append(info(f"The guild returns from {dungeon.name}."))
     messages.append(
-        info("Campaign time, contract countdown, injuries, satisfaction, and retirement are resolved during campaign cycle processing.")
+        info("Campaign time, contract countdown, injuries, satisfaction, retirement, and the next hiring market are resolved during campaign cycle processing.")
     )
 
     return messages

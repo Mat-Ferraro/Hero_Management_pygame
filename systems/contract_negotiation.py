@@ -14,7 +14,7 @@ from systems.rival_guilds import (
 
 
 GRADE_ORDER = ["A", "B", "C", "D", "F"]
-
+FALLBACK_CONTRACT_CAMPAIGNS = 1
 
 def ensure_contract_state(state) -> None:
     if not hasattr(state, "contract_offers"):
@@ -26,8 +26,26 @@ def ensure_contract_state(state) -> None:
     if not hasattr(state, "contract_round"):
         state.contract_round = 1
 
-    ensure_rival_guild_state(state)
+    if not hasattr(state, "seasonal_contract_pool"):
+        state.seasonal_contract_pool = list(getattr(state, "available_contracts", []))
 
+    if not hasattr(state, "market_stage"):
+        state.market_stage = 1
+
+    if not hasattr(state, "market_stage_max"):
+        state.market_stage_max = 3
+
+    if not hasattr(state, "market_cycle"):
+        state.market_cycle = 1
+
+    if not hasattr(state, "market_fallback_open"):
+        state.market_fallback_open = False
+
+    if not hasattr(state, "market_closed"):
+        state.market_closed = False
+
+    ensure_rival_guild_state(state)
+    
 
 def ensure_hero_profile(hero) -> None:
     if not hasattr(hero, "preferred_campaigns"):
@@ -55,6 +73,88 @@ def ensure_hero_profile(hero) -> None:
         if not hasattr(hero, attr):
             setattr(hero, attr, default)
 
+def market_stage_label(state) -> str:
+    ensure_contract_state(state)
+
+    if getattr(state, "market_closed", False):
+        return "Closed"
+
+    if getattr(state, "market_fallback_open", False):
+        return "Fallback"
+
+    return f"Stage {int(getattr(state, 'market_stage', 1))}/{int(getattr(state, 'market_stage_max', 3))}"
+
+
+def fallback_static_price(hero) -> int:
+    ensure_hero_profile(hero)
+
+    price = int(getattr(hero, "asking_signing_fee", 100) * 0.55)
+
+    tier = getattr(hero, "market_tier", "Standard")
+    if tier == "Developmental":
+        price = int(price * 0.85)
+    elif tier == "Premium":
+        price = int(price * 1.10)
+    elif tier == "Elite":
+        price = int(price * 1.20)
+
+    phase = career_phase_name(hero)
+    if phase == "Rookie":
+        price = int(price * 0.90)
+    elif phase == "Prime":
+        price = int(price * 1.05)
+    elif phase == "Veteran":
+        price = int(price * 0.90)
+    elif phase == "Elder":
+        price = int(price * 0.80)
+
+    return max(25, price)
+
+
+def convert_hero_to_fallback_contract(hero) -> None:
+    ensure_hero_profile(hero)
+    hero.preferred_campaigns = FALLBACK_CONTRACT_CAMPAIGNS
+    hero.asking_signing_fee = fallback_static_price(hero)
+    hero.asking_fee_per_campaign = hero.asking_signing_fee
+
+
+def open_fallback_market(state, heroes: List) -> None:
+    ensure_contract_state(state)
+
+    remaining = list(heroes)
+    for hero in remaining:
+        convert_hero_to_fallback_contract(hero)
+
+    state.market_fallback_open = True
+    state.market_closed = False
+    state.available_contracts = remaining
+    state.seasonal_contract_pool = list(remaining)
+    state.contract_offers = []
+
+    state.market_history.append(
+        f"Fallback market opened with {len(remaining)} unsigned hero(es) at fixed 1-campaign prices."
+    )
+
+
+def close_market_cycle(state) -> List[str]:
+    ensure_contract_state(state)
+
+    results = []
+    unsigned = list(getattr(state, "available_contracts", []))
+
+    if unsigned:
+        state.retired_heroes.extend(unsigned)
+        results.append(f"{len(unsigned)} unsigned hero(es) left the market and are out of circulation.")
+
+    state.available_contracts = []
+    state.seasonal_contract_pool = []
+    state.contract_offers = []
+    state.market_fallback_open = False
+    state.market_closed = True
+    state.contract_round = 1
+    state.market_stage = 1
+
+    return results
 
 def is_expiring_hero(hero) -> bool:
     return max(0, int(getattr(hero, "contract_years", 0))) <= 1
@@ -226,13 +326,16 @@ def default_renewal_offer_for_hero(state, hero) -> Dict:
         "offered_signing_fee": int(signing_fee),
     }
 
-
 def queue_offer(state, hero, campaigns: int, signing_fee: int) -> None:
     ensure_contract_state(state)
     ensure_hero_profile(hero)
 
-    campaigns = max(1, int(campaigns))
-    signing_fee = max(25, int(signing_fee))
+    if getattr(state, "market_fallback_open", False):
+        campaigns = FALLBACK_CONTRACT_CAMPAIGNS
+        signing_fee = fallback_static_price(hero)
+    else:
+        campaigns = max(1, int(campaigns))
+        signing_fee = max(25, int(signing_fee))
 
     existing = get_offer_for_hero(state, hero)
     if existing is not None:
@@ -247,7 +350,6 @@ def queue_offer(state, hero, campaigns: int, signing_fee: int) -> None:
             "offered_signing_fee": signing_fee,
         }
     )
-
 
 def queue_renewal_offer(state, hero, campaigns: int, signing_fee: int) -> None:
     ensure_contract_state(state)
@@ -525,63 +627,160 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
     ensure_contract_state(state)
     ensure_hero_profile(hero)
 
+    if getattr(state, "market_fallback_open", False) or getattr(state, "market_closed", False):
+        return None
+
     guild = rival_guild_for_hero(state, hero)
     if guild is None:
         return None
 
+    phase = career_phase_name(hero)
+    tier = getattr(hero, "market_tier", "Standard")
+    power = int(hero.combat_power()) if hasattr(hero, "combat_power") else int(getattr(hero, "level", 1) * 10)
+
     tier_bonus = {
-        "Developmental": -14,
+        "Developmental": -18,
         "Standard": 0,
-        "Premium": 10,
-        "Elite": 18,
-    }.get(getattr(hero, "market_tier", "Standard"), 0)
+        "Premium": 14,
+        "Elite": 24,
+    }.get(tier, 0)
 
     phase_bonus = {
-        "Rookie": -4,
-        "Rising": 3,
-        "Prime": 9,
-        "Veteran": 2,
-        "Elder": -3,
-    }.get(career_phase_name(hero), 0)
+        "Rookie": -6,
+        "Rising": 4,
+        "Prime": 12,
+        "Veteran": 5,
+        "Elder": -2,
+    }.get(phase, 0)
 
-    seed = f"{guild['name']}:{hero.name}:{getattr(state, 'contract_round', 1)}:{state.year}"
+    power_bonus = 0
+    if power >= 140:
+        power_bonus = 22
+    elif power >= 120:
+        power_bonus = 16
+    elif power >= 100:
+        power_bonus = 10
+    elif power >= 85:
+        power_bonus = 5
+
+    subclass_bonus = min(10, len(getattr(hero, "unlocked_subclasses", []) or []) * 4)
+
+    seed = f"{guild['name']}:{hero.name}:{getattr(state, 'contract_round', 1)}:{state.year}:{getattr(state, 'market_stage', 1)}"
     rng = random.Random(seed)
 
-    interest_roll = rng.random()
-    interest_threshold = 0.15
+    interest = 0.10
+
+    if tier == "Elite":
+        interest = 0.96
+    elif tier == "Premium":
+        interest = 0.82
+    elif phase == "Prime":
+        interest = 0.72
+    elif phase == "Veteran":
+        interest = 0.54
+    elif getattr(hero, "is_developmental", False):
+        interest = 0.28
+    elif phase == "Rookie":
+        interest = 0.18
+
+    if power >= 120:
+        interest += 0.16
+    elif power >= 100:
+        interest += 0.10
+    elif power >= 85:
+        interest += 0.06
+    elif power <= 55:
+        interest -= 0.12
+
+    if guild.get("class_preference") == hero.hero_class:
+        interest += 0.12
 
     if getattr(hero, "is_developmental", False):
-        interest_threshold = 0.65 - (max(0, guild.get("rookie_interest", 0)) / 40.0)
+        interest += max(0, guild.get("rookie_interest", 0)) / 140.0
     else:
-        interest_threshold = 0.15 - (max(0, guild.get("aggression", 0)) / 100.0)
+        interest += max(0, guild.get("aggression", 0)) / 180.0
+        interest += max(0, guild.get("prestige", 0)) / 220.0
 
-    if career_phase_name(hero) == "Prime":
-        interest_threshold -= 0.05
-    elif career_phase_name(hero) == "Elder":
-        interest_threshold += 0.06
+    if phase == "Elder":
+        interest -= 0.08
 
-    interest_threshold = max(0.02, min(0.85, interest_threshold))
-    if interest_roll < interest_threshold:
+    interest = max(0.02, min(0.99, interest))
+
+    if rng.random() > interest:
         return None
 
-    base = 56.0 + tier_bonus + phase_bonus + rng.randint(-7, 7)
-    base += guild.get("wealth_bias", 0) * 0.9
-    base += guild.get("aggression", 0) * 0.45
+    base = 48.0
+    base += tier_bonus
+    base += phase_bonus
+    base += power_bonus
+    base += subclass_bonus
+    base += guild.get("wealth_bias", 0) * 0.8
+    base += guild.get("aggression", 0) * 0.40
     base += guild.get("prestige", 0) * 0.35
 
     if guild.get("class_preference") == hero.hero_class:
-        base += 8
+        base += 10
 
     if getattr(hero, "is_developmental", False):
-        base += guild.get("rookie_interest", 0) * 0.7
+        base += guild.get("rookie_interest", 0) * 0.45
 
     if getattr(hero, "contract_attitude", "") == "Mercenary":
         base += 4
     if getattr(hero, "contract_attitude", "") == "Noble":
-        base += 2 + (guild.get("prestige", 0) * 0.25)
+        base += 2 + (guild.get("prestige", 0) * 0.20)
 
-    return max(25.0, min(95.0, base))
+    base += rng.randint(-5, 5)
 
+    return max(25.0, min(98.0, base))
+
+def personal_acceptance_threshold(state, hero) -> float:
+    ensure_hero_profile(hero)
+
+    phase = career_phase_name(hero)
+    tier = getattr(hero, "market_tier", "Standard")
+    satisfaction_like = 50.0
+
+    threshold = 54.0
+
+    threshold += {
+        "Rookie": -4.0,
+        "Rising": 1.0,
+        "Prime": 8.0,
+        "Veteran": 4.0,
+        "Elder": 2.0,
+    }.get(phase, 0.0)
+
+    threshold += {
+        "Developmental": -6.0,
+        "Standard": 0.0,
+        "Premium": 5.0,
+        "Elite": 10.0,
+    }.get(tier, 0.0)
+
+    power = int(getattr(hero, "combat_power", lambda: 0)()) if callable(getattr(hero, "combat_power", None)) else int(getattr(hero, "level", 1) * 10)
+    if power >= 120:
+        threshold += 8.0
+    elif power >= 100:
+        threshold += 5.0
+    elif power >= 85:
+        threshold += 3.0
+
+    attitude = getattr(hero, "contract_attitude", "Practical")
+    if attitude == "Mercenary":
+        threshold += 4.0
+    elif attitude == "Ambitious":
+        threshold += 3.0
+    elif attitude == "Noble":
+        threshold += 2.0
+    elif attitude == "Modest":
+        threshold -= 3.0
+
+    if getattr(hero, "is_developmental", False):
+        threshold -= 4.0
+
+    threshold += max(-3.0, min(3.0, (50.0 - satisfaction_like) / 20.0))
+
+    return max(38.0, min(82.0, threshold))
 
 def estimate_rival_grade_hint(state, hero) -> str:
     rival_score = estimate_rival_offer_score(state, hero)
@@ -677,11 +876,31 @@ def renewal_offer_summary(state, hero) -> Tuple[int, int]:
     return offer["offered_campaigns"], offer["offered_signing_fee"]
 
 
+
 def resolve_contract_round(state) -> List[str]:
     ensure_contract_state(state)
 
     results: List[str] = []
-    header = f"=== Contract Round {state.contract_round} ==="
+
+    if getattr(state, "market_closed", False):
+        results.append("The hiring market is closed until the next cycle.")
+        return results
+
+    if getattr(state, "market_fallback_open", False):
+        close_messages = close_market_cycle(state)
+        for message in close_messages:
+            results.append(message)
+            add_market_history_entry(state, message)
+
+        if not close_messages:
+            message = "Fallback hiring ended."
+            results.append(message)
+            add_market_history_entry(state, message)
+
+        return results
+
+    stage_text = market_stage_label(state)
+    header = f"=== Hiring {stage_text} ==="
     results.append(header)
     add_market_history_entry(state, header)
 
@@ -695,6 +914,12 @@ def resolve_contract_round(state) -> List[str]:
     remaining_gold = state.gold
 
     current_market = list(state.available_contracts)
+
+    signed_to_player = []
+    signed_elsewhere = []
+    rejected_offers = []
+    processed_names = set()
+    persistent_offer_names = set()
 
     offered_heroes = [
         hero
@@ -711,11 +936,6 @@ def resolve_contract_round(state) -> List[str]:
         reverse=True,
     )
 
-    signed_to_player = []
-    signed_elsewhere = []
-
-    processed_names = set()
-
     for hero in offered_heroes:
         processed_names.add(hero.name)
         offer = offers_by_name[hero.name]
@@ -726,20 +946,69 @@ def resolve_contract_round(state) -> List[str]:
         player_score = evaluate_offer_score(state, hero, campaigns, signing_fee)
         rival_score = estimate_rival_offer_score(state, hero)
         rival_name = rival_guild_name_for_hero(state, hero)
+        accept_threshold = personal_acceptance_threshold(state, hero)
 
         if open_slots <= 0:
             message = f"{hero.name}: no roster space remained, so the offer failed."
             results.append(message)
             add_market_history_entry(state, message)
+            persistent_offer_names.add(hero.name)
             continue
 
         if remaining_gold < signing_fee:
             message = f"{hero.name}: not enough gold remained to honor the offer."
             results.append(message)
             add_market_history_entry(state, message)
+            persistent_offer_names.add(hero.name)
             continue
 
-        if rival_score is None or player_score >= rival_score:
+        if player_score < accept_threshold and (rival_score is None or rival_score < accept_threshold):
+            rejected_offers.append(hero)
+            persistent_offer_names.add(hero.name)
+            message = (
+                f"{hero.name} rejected all current offers. "
+                f"Your offer grade {grade_for_score(player_score)} was below their standard."
+            )
+            results.append(message)
+            add_market_history_entry(state, message)
+            continue
+
+        if rival_score is None:
+            if player_score >= accept_threshold:
+                remaining_gold -= signing_fee
+                open_slots -= 1
+
+                hero.contract_years = campaigns
+                hero.signing_bonus = signing_fee
+
+                state.roster.append(hero)
+                signed_to_player.append(hero)
+
+                message = f"{hero.name} accepted your deal ({signing_fee}g / {campaigns}c)."
+                results.append(message)
+                add_market_history_entry(state, message)
+            else:
+                rejected_offers.append(hero)
+                persistent_offer_names.add(hero.name)
+                message = f"{hero.name} rejected your offer."
+                results.append(message)
+                add_market_history_entry(state, message)
+            continue
+
+        best_score = max(player_score, rival_score)
+
+        if best_score < accept_threshold:
+            rejected_offers.append(hero)
+            persistent_offer_names.add(hero.name)
+            message = (
+                f"{hero.name} rejected both your offer and the rival approach. "
+                f"They are holding out for better terms."
+            )
+            results.append(message)
+            add_market_history_entry(state, message)
+            continue
+
+        if player_score >= rival_score and player_score >= accept_threshold:
             remaining_gold -= signing_fee
             open_slots -= 1
 
@@ -749,10 +1018,13 @@ def resolve_contract_round(state) -> List[str]:
             state.roster.append(hero)
             signed_to_player.append(hero)
 
-            message = f"{hero.name} accepted your deal ({signing_fee}g / {campaigns}c)."
+            message = (
+                f"{hero.name} accepted your deal ({signing_fee}g / {campaigns}c). "
+                f"Your offer {grade_for_score(player_score)} beat rivals {grade_for_score(rival_score)}."
+            )
             results.append(message)
             add_market_history_entry(state, message)
-        else:
+        elif rival_score >= accept_threshold:
             signed_elsewhere.append(hero)
             add_hero_to_rival_guild(state, rival_name, hero)
 
@@ -762,6 +1034,12 @@ def resolve_contract_round(state) -> List[str]:
             )
             results.append(message)
             add_market_history_entry(state, message)
+        else:
+            rejected_offers.append(hero)
+            persistent_offer_names.add(hero.name)
+            message = f"{hero.name} rejected the current market and remained unsigned."
+            results.append(message)
+            add_market_history_entry(state, message)
 
     for hero in current_market:
         if hero.name in processed_names:
@@ -769,8 +1047,9 @@ def resolve_contract_round(state) -> List[str]:
 
         rival_score = estimate_rival_offer_score(state, hero)
         rival_name = rival_guild_name_for_hero(state, hero)
+        accept_threshold = personal_acceptance_threshold(state, hero)
 
-        if rival_score is not None and rival_score >= 62:
+        if rival_score is not None and rival_score >= accept_threshold:
             signed_elsewhere.append(hero)
             add_hero_to_rival_guild(state, rival_name, hero)
 
@@ -783,8 +1062,6 @@ def resolve_contract_round(state) -> List[str]:
             add_market_history_entry(state, message)
 
     state.gold = remaining_gold
-    state.contract_round += 1
-    state.contract_offers = []
 
     signed_names = {hero.name for hero in signed_to_player}
     rival_names = {hero.name for hero in signed_elsewhere}
@@ -795,28 +1072,53 @@ def resolve_contract_round(state) -> List[str]:
         if hero.name not in signed_names and hero.name not in rival_names
     ]
 
-    rookie_count = max(3, len(signed_to_player) + len(signed_elsewhere))
-    rookies = generate_fallback_contract_market(state, count=rookie_count)
+    state.available_contracts = list(remaining_market)
+    state.seasonal_contract_pool = list(remaining_market)
 
-    existing_names = {hero.name for hero in remaining_market}
-    rookie_additions = [hero for hero in rookies if hero.name not in existing_names]
+    state.contract_offers = [
+        offer
+        for offer in state.contract_offers
+        if offer["hero_name"] in persistent_offer_names
+        and offer["hero_name"] in {hero.name for hero in remaining_market}
+    ]
 
-    state.available_contracts = remaining_market + rookie_additions
-
-    if not signed_to_player:
-        message = "You did not sign any heroes this round."
+    if signed_to_player:
+        message = f"You signed {len(signed_to_player)} hero(es) this stage."
         results.append(message)
         add_market_history_entry(state, message)
     else:
-        message = f"You signed {len(signed_to_player)} hero(es) this round."
+        message = "You did not sign any heroes this stage."
         results.append(message)
         add_market_history_entry(state, message)
 
-    message = (
-        f"Remaining recruits carried over: {len(remaining_market)}. "
-        f"New rookies added: {len(rookie_additions)}."
-    )
-    results.append(message)
-    add_market_history_entry(state, message)
+    if rejected_offers:
+        message = f"{len(rejected_offers)} hero(es) rejected the current terms."
+        results.append(message)
+        add_market_history_entry(state, message)
+
+    if persistent_offer_names:
+        message = f"{len(persistent_offer_names)} offer(s) remain active for the next stage."
+        results.append(message)
+        add_market_history_entry(state, message)
+
+    if int(getattr(state, "market_stage", 1)) < int(getattr(state, "market_stage_max", 3)):
+        state.market_stage += 1
+        state.contract_round = state.market_stage
+
+        message = (
+            f"Advanced to hiring stage {state.market_stage}/{state.market_stage_max}. "
+            f"{len(remaining_market)} recruit(s) remain in the pool."
+        )
+        results.append(message)
+        add_market_history_entry(state, message)
+    else:
+        open_fallback_market(state, remaining_market)
+
+        message = (
+            f"Negotiation stages are complete. "
+            f"{len(remaining_market)} recruit(s) moved to fixed 1-campaign fallback deals."
+        )
+        results.append(message)
+        add_market_history_entry(state, message)
 
     return results

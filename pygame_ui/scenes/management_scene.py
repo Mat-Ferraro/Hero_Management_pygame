@@ -34,6 +34,7 @@ from systems.contract_negotiation import (
     rival_summary_for_hero,
     visible_offer_modifiers,
     visible_renewal_modifiers,
+    market_stage_label,
 )
 from systems.hero_career import career_phase_name, career_phase_summary
 from systems.hero_progression import ensure_progression_fields
@@ -185,6 +186,7 @@ class ManagementScene(SceneBase):
 
         self.update_and_draw_buttons(screen, self.build_all_buttons())
 
+
     def draw_header(self, screen):
         HeaderPanel(
             rect=(40, 30, 1840, 110),
@@ -197,18 +199,20 @@ class ManagementScene(SceneBase):
 
         expiring = sum(1 for hero in self.state.roster if is_expiring_hero(hero))
         renewals = len(getattr(self.state, "renewal_offers", []))
+        stage_text = market_stage_label(self.state)
 
         ResourceHeader(
             resources=[
                 ("Gold", f"{self.state.gold}g"),
                 ("Roster", f"{len(self.state.roster)}/{self.roster_capacity()}"),
                 ("Recruits", len(self.state.available_contracts)),
+                ("Stage", stage_text),
                 ("Offers", len(getattr(self.state, "contract_offers", []))),
                 ("Renewals", renewals),
                 ("Expiring", expiring),
             ],
-            spacing=125,
-            item_max_width=150,
+            spacing=135,
+            item_max_width=185,
             font_size=24,
             label_color=theme.TEXT_MUTED,
             value_color=theme.TEXT_PRIMARY,
@@ -609,12 +613,32 @@ class ManagementScene(SceneBase):
         title = "Offer Controls" if self.selected_source == "Recruit" else "Actions"
         if self.selected_source == "Roster" and self.selected_hero is not None and is_expiring_hero(self.selected_hero):
             title = "Renewal Controls"
+        if getattr(self.state, "market_fallback_open", False):
+            title = "Fallback Hiring"
 
         Panel(self.controls_panel_rect, title).draw(screen, self.title_font)
 
+        if getattr(self.state, "market_fallback_open", False):
+            hint = self.small_font.render(
+                "Fallback market: fixed 1-campaign prices. Hire immediately.",
+                True,
+                theme.TEXT_MUTED,
+            )
+            screen.blit(hint, (1295, 812))
+
+            if self.selected_hero is not None and self.selected_source == "Recruit":
+                price_text = self.small_font.render(
+                    f"Selected price: {int(getattr(self.selected_hero, 'asking_signing_fee', 25))}g / 1c",
+                    True,
+                    theme.TEXT_SECONDARY,
+                )
+                screen.blit(price_text, (1295, 846))
+
+            return
+
         if self.selected_source == "Recruit" and self.selected_hero is not None:
             hint = self.small_font.render(
-                "Adjust terms, then queue the offer for this round.",
+                "Adjust terms, then queue the offer for this stage.",
                 True,
                 theme.TEXT_MUTED,
             )
@@ -648,11 +672,63 @@ class ManagementScene(SceneBase):
             )
             screen.blit(hint, (1295, 850))
 
+    def hire_selected_fallback_hero(self):
+        if self.selected_hero is None or self.selected_source != "Recruit":
+            self.status_message = "Select a fallback recruit first."
+            return
+
+        if not getattr(self.state, "market_fallback_open", False):
+            self.status_message = "Fallback hiring is not active."
+            return
+
+        hero = self.selected_hero
+        price = int(getattr(hero, "asking_signing_fee", 25))
+
+        if len(self.state.roster) >= self.roster_capacity():
+            self.status_message = "No roster space remains."
+            return
+
+        if self.state.gold < price:
+            self.status_message = f"Not enough gold to hire {hero.name}."
+            return
+
+        if hero not in self.state.available_contracts:
+            self.status_message = "That recruit is no longer available."
+            self.selected_hero = None
+            self.selected_source = ""
+            return
+
+        self.state.gold -= price
+        hero.contract_years = 1
+        hero.signing_bonus = price
+
+        self.state.roster.append(hero)
+        self.state.available_contracts.remove(hero)
+
+        if hero in getattr(self.state, "seasonal_contract_pool", []):
+            self.state.seasonal_contract_pool.remove(hero)
+
+        self.selected_hero = None
+        self.selected_source = ""
+        self.sync_lists()
+
+        if self.on_save_game:
+            self.on_save_game()
+
+        self.status_message = f"Hired {hero.name} on a 1-campaign fallback deal for {price}g."
+
     def build_all_buttons(self):
         buttons = [
             Button((1680, 72, 140, 36), "Hub", self.on_return_to_hub),
-            Button((1490, 72, 170, 36), "Resolve Round", self.resolve_offers),
         ]
+
+        if not getattr(self.state, "market_fallback_open", False):
+            buttons.append(Button((1490, 72, 170, 36), "Resolve Round", self.resolve_offers))
+
+        if getattr(self.state, "market_fallback_open", False):
+            if self.selected_source == "Recruit" and self.selected_hero is not None:
+                buttons.append(Button((1450, 930, 170, 42), "Hire", self.hire_selected_fallback_hero))
+            return buttons
 
         if self.selected_source == "Recruit" and self.selected_hero is not None:
             buttons.extend(self.campaign_control.get_buttons())
@@ -704,6 +780,11 @@ class ManagementScene(SceneBase):
             if offer is None:
                 offer = default_offer_for_hero(self.selected_hero)
 
+            if getattr(self.state, "market_fallback_open", False):
+                self.offer_campaigns = 1
+                self.offer_signing_fee = int(getattr(self.selected_hero, "asking_signing_fee", 25))
+                return
+
             self.offer_campaigns = int(offer["offered_campaigns"])
             self.offer_signing_fee = int(offer["offered_signing_fee"])
             return
@@ -717,15 +798,29 @@ class ManagementScene(SceneBase):
             self.offer_signing_fee = int(offer["offered_signing_fee"])
 
     def decrease_campaigns(self):
+        if getattr(self.state, "market_fallback_open", False):
+            self.offer_campaigns = 1
+            return
         self.offer_campaigns = max(1, self.offer_campaigns - 1)
 
     def increase_campaigns(self):
+        if getattr(self.state, "market_fallback_open", False):
+            self.offer_campaigns = 1
+            return
         self.offer_campaigns += 1
 
     def decrease_fee(self):
+        if getattr(self.state, "market_fallback_open", False):
+            if self.selected_hero is not None:
+                self.offer_signing_fee = int(getattr(self.selected_hero, "asking_signing_fee", 25))
+            return
         self.offer_signing_fee = max(25, self.offer_signing_fee - 25)
 
     def increase_fee(self):
+        if getattr(self.state, "market_fallback_open", False):
+            if self.selected_hero is not None:
+                self.offer_signing_fee = int(getattr(self.selected_hero, "asking_signing_fee", 25))
+            return
         self.offer_signing_fee += 25
 
     def queue_selected_offer(self):
@@ -740,13 +835,21 @@ class ManagementScene(SceneBase):
             self.offer_signing_fee,
         )
 
+        self.load_offer_editor_for_selected()
+
         if self.on_save_game:
             self.on_save_game()
 
-        self.status_message = (
-            f"Queued offer for {self.selected_hero.name}: "
-            f"{self.offer_signing_fee}g / {self.offer_campaigns}c."
-        )
+        if getattr(self.state, "market_fallback_open", False):
+            self.status_message = (
+                f"Queued fallback hire for {self.selected_hero.name}: "
+                f"{self.offer_signing_fee}g / 1c."
+            )
+        else:
+            self.status_message = (
+                f"Queued offer for {self.selected_hero.name}: "
+                f"{self.offer_signing_fee}g / {self.offer_campaigns}c."
+            )
 
     def clear_selected_offer(self):
         if self.selected_hero is None or self.selected_source != "Recruit":

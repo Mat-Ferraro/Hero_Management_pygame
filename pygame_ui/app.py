@@ -1,7 +1,14 @@
 import pygame
 
-from game_state import campaign_is_active, create_game, start_campaign_runtime
+from game_state import (
+    campaign_is_active,
+    clear_campaign_runtime,
+    create_game,
+    start_campaign_runtime,
+    stop_campaign_runtime,
+)
 from save_system import load_game, save_exists, save_game
+from systems.campaign_cycle import CampaignCycleManager
 from systems.rival_guilds import ensure_rival_guild_state
 
 from pygame_ui.dev_console import DevConsole
@@ -114,11 +121,37 @@ class App:
 
         self.scene = CampaignMapScene(
             state=self.state,
-            on_return_to_hub=self.show_game_hub,
+            on_campaign_complete=self.handle_campaign_complete,
             on_open_task=self.show_mission_assignment,
             on_save_game=self.save_current_game,
             status_message=status_message,
         )
+
+    def handle_campaign_complete(self):
+        if self.state is None:
+            return
+
+        runtime = getattr(self.state, "campaign_runtime", None)
+
+        participating_heroes = [
+            hero
+            for hero in self.state.roster
+            if getattr(hero, "participated_this_cycle", False)
+        ]
+
+        cycle_messages = CampaignCycleManager(self.state).advance_cycle(participating_heroes)
+
+        if runtime is not None:
+            stop_campaign_runtime(self.state)
+            clear_campaign_runtime(self.state)
+
+        self.save_current_game()
+
+        status_message = "Campaign cycle resolved."
+        if cycle_messages:
+            status_message = cycle_messages[-1]
+
+        self.show_game_hub(status_message=status_message)
 
     def show_mission_assignment(self, task_id):
         self.scene = MissionAssignmentScene(

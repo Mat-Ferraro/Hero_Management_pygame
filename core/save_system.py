@@ -246,7 +246,6 @@ def campaign_runtime_from_dict(data):
         return None
     return CampaignRuntime.from_dict(data)
 
-
 def game_state_to_dict(state: GameState) -> Dict:
     ensure_rival_guild_state(state)
 
@@ -262,28 +261,28 @@ def game_state_to_dict(state: GameState) -> Dict:
         "retired_heroes": [hero_to_dict(hero) for hero in state.retired_heroes],
         "fallen_heroes": [hero_to_dict(hero) for hero in state.fallen_heroes],
         "reputation": reputation_to_dict(state.reputation),
-        "pending_bereavement_payments": [
-            bereavement_to_dict(payment) for payment in state.pending_bereavement_payments
-        ],
+        "pending_bereavement_payments": [bereavement_to_dict(p) for p in state.pending_bereavement_payments],
         "guild_upgrades": guild_upgrades_to_dict(state.guild_upgrades),
         "rival_guilds": [rival_guild_to_dict(guild) for guild in state.rival_guilds],
         "contract_offers": [contract_offer_to_dict(offer) for offer in state.contract_offers],
         "renewal_offers": [contract_offer_to_dict(offer) for offer in state.renewal_offers],
         "contract_round": int(state.contract_round),
         "market_history": list(state.market_history),
-        "campaign_runtime": campaign_runtime_to_dict(getattr(state, "campaign_runtime", None)),
+        "seasonal_contract_pool": [hero_to_dict(hero) for hero in getattr(state, "seasonal_contract_pool", [])],
+        "market_stage": int(getattr(state, "market_stage", 1)),
+        "market_stage_max": int(getattr(state, "market_stage_max", 3)),
+        "market_cycle": int(getattr(state, "market_cycle", 1)),
+        "market_fallback_open": bool(getattr(state, "market_fallback_open", False)),
+        "market_closed": bool(getattr(state, "market_closed", False)),
     }
-
 
 def game_state_from_dict(data: Dict) -> GameState:
     state = GameState(
-        expedition=int(data["expedition"]),
-        year=int(data["year"]),
-        gold=int(data["gold"]),
+        expedition=int(data.get("expedition", 1)),
+        year=int(data.get("year", 1)),
+        gold=int(data.get("gold", 0)),
         roster=[hero_from_dict(hero_data) for hero_data in data.get("roster", [])],
-        available_contracts=[
-            hero_from_dict(hero_data) for hero_data in data.get("available_contracts", [])
-        ],
+        available_contracts=[hero_from_dict(hero_data) for hero_data in data.get("available_contracts", [])],
         inventory=[item_from_dict(item_data) for item_data in data.get("inventory", [])],
         dungeons=[dungeon_from_dict(dungeon_data) for dungeon_data in data.get("dungeons", [])],
         retired_heroes=[hero_from_dict(hero_data) for hero_data in data.get("retired_heroes", [])],
@@ -293,18 +292,26 @@ def game_state_from_dict(data: Dict) -> GameState:
             bereavement_from_dict(payment_data)
             for payment_data in data.get("pending_bereavement_payments", [])
         ],
-        guild_upgrades=guild_upgrades_from_dict(data.get("guild_upgrades")),
+        guild_upgrades=guild_upgrades_from_dict(data.get("guild_upgrades", {})),
         rival_guilds=[rival_guild_from_dict(guild_data) for guild_data in data.get("rival_guilds", [])],
         contract_offers=[contract_offer_from_dict(offer_data) for offer_data in data.get("contract_offers", [])],
         renewal_offers=[contract_offer_from_dict(offer_data) for offer_data in data.get("renewal_offers", [])],
         contract_round=int(data.get("contract_round", 1)),
         market_history=list(data.get("market_history", [])),
-        campaign_runtime=campaign_runtime_from_dict(data.get("campaign_runtime")),
+        seasonal_contract_pool=[hero_from_dict(hero_data) for hero_data in data.get("seasonal_contract_pool", [])],
+        market_stage=int(data.get("market_stage", 1)),
+        market_stage_max=int(data.get("market_stage_max", 3)),
+        market_cycle=int(data.get("market_cycle", 1)),
+        market_fallback_open=bool(data.get("market_fallback_open", False)),
+        market_closed=bool(data.get("market_closed", False)),
     )
 
     ensure_rival_guild_state(state)
-    return state
 
+    if not getattr(state, "seasonal_contract_pool", []):
+        state.seasonal_contract_pool = list(state.available_contracts)
+
+    return state
 
 def save_game(state: GameState, path: Path = DEFAULT_SAVE_PATH) -> Path:
     SAVE_DIR.mkdir(parents=True, exist_ok=True)

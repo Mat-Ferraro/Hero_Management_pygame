@@ -26,11 +26,18 @@ from systems.campaign.task_dispatch import find_task
 
 
 class CampaignMapScene(SceneBase):
-    def __init__(self, state, on_return_to_hub, on_open_task, on_save_game, status_message=""):
+    def __init__(
+        self,
+        state,
+        on_campaign_complete,
+        on_open_task,
+        on_save_game,
+        status_message="",
+    ):
         super().__init__()
 
         self.state = state
-        self.on_return_to_hub = on_return_to_hub
+        self.on_campaign_complete = on_campaign_complete
         self.on_open_task = on_open_task
         self.on_save_game = on_save_game
 
@@ -42,11 +49,18 @@ class CampaignMapScene(SceneBase):
         self.last_update_ticks = pygame.time.get_ticks()
         self.rng = None
 
+        self.campaign_complete = False
+        self.campaign_started = False
+
         self.map_rect = pygame.Rect(30, 120, 1820, 760)
         self.footer_rect = pygame.Rect(30, 900, 1820, 130)
+        self.summary_rect = pygame.Rect(420, 220, 1000, 500)
 
     def handle_event(self, event):
         if self.handle_buttons_click(event, self.build_buttons()):
+            return
+
+        if self.campaign_complete:
             return
 
         if event.type == pygame.MOUSEBUTTONDOWN and getattr(event, "button", None) == 1:
@@ -56,6 +70,9 @@ class CampaignMapScene(SceneBase):
     def update(self, mouse_pos):
         super().update(mouse_pos)
 
+        if self.campaign_complete:
+            return
+
         now_ticks = pygame.time.get_ticks()
         delta_seconds = max(0.0, (now_ticks - self.last_update_ticks) / 1000.0)
         self.last_update_ticks = now_ticks
@@ -63,14 +80,27 @@ class CampaignMapScene(SceneBase):
         self.runtime.paused = False
         tick_campaign_runtime(self.runtime, self.state, delta_seconds, self.rng)
 
-        if not self.runtime.active:
+        if self.detect_campaign_started():
+            self.campaign_started = True
+
+        if self.should_end_campaign():
+            self.runtime.paused = True
+            self.runtime.active = False
+            self.campaign_complete = True
             self.status_message = "Campaign complete."
+
+            if self.on_save_game:
+                self.on_save_game()
 
     def draw(self, screen):
         self.clear_screen(screen)
         self.draw_header(screen)
         self.draw_map_panel(screen)
         self.draw_footer_roster(screen)
+
+        if self.campaign_complete:
+            self.draw_campaign_complete_overlay(screen)
+
         self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
@@ -253,12 +283,58 @@ class CampaignMapScene(SceneBase):
                 style=badge_style,
             ).draw(screen, self.small_font)
 
-    def build_buttons(self):
-        return [
-            Button((1660, 48, 160, 34), "Return to Hub", self.return_to_hub),
+    def draw_campaign_complete_overlay(self, screen):
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        screen.blit(overlay, (0, 0))
+
+        pygame.draw.rect(screen, (34, 34, 42), self.summary_rect, border_radius=16)
+        pygame.draw.rect(screen, (104, 112, 138), self.summary_rect, 2, border_radius=16)
+
+        title = self.title_font.render("Campaign Complete", True, theme.TEXT_PRIMARY)
+        screen.blit(title, (self.summary_rect.x + 28, self.summary_rect.y + 24))
+
+        lines = [
+            f"Campaign Time: {self.runtime.elapsed_time:.1f}",
+            f"Remaining Live Tasks: {self.live_task_count()}",
+            f"Ready Heroes: {self.available_hero_count()}",
+            f"Roster Size: {len(self.state.roster)}",
+            "",
+            "All tasks have been resolved and all heroes have returned to the guild.",
+            "Resting heroes will recover during campaign-cycle processing.",
+            "",
+            "Press Continue to resolve campaign results and return to the guild hall.",
         ]
 
+        y = self.summary_rect.y + 90
+        for line in lines:
+            if line == "":
+                y += 22
+                continue
+
+            text = self.font.render(line, True, theme.TEXT_SECONDARY)
+            screen.blit(text, (self.summary_rect.x + 28, y))
+            y += 34
+
+    def build_buttons(self):
+        if self.campaign_complete:
+            return [
+                Button(
+                    (self.summary_rect.centerx - 110, self.summary_rect.bottom - 72, 220, 42),
+                    "Continue",
+                    self.finish_campaign,
+                ),
+            ]
+
+        return []
+
+    def finish_campaign(self):
+        self.on_campaign_complete()
+
     def handle_task_click(self, pos):
+        if self.campaign_complete:
+            return False
+
         for task in self.runtime.active_tasks:
             if task.is_terminal():
                 continue
@@ -274,10 +350,58 @@ class CampaignMapScene(SceneBase):
 
         return False
 
-    def return_to_hub(self):
-        if self.on_save_game:
-            self.on_save_game()
-        self.on_return_to_hub("Returned from campaign.")
+    def detect_campaign_started(self):
+        if self.live_task_count() > 0:
+            return True
+
+        if self.has_active_field_heroes():
+            return True
+
+        for hero in self.state.roster:
+            if getattr(hero, "participated_this_cycle", False):
+                return True
+
+        return False
+
+    def should_end_campaign(self):
+        if not self.campaign_started:
+            return False
+
+        if self.has_unresolved_tasks():
+            return False
+
+        if self.has_active_field_heroes():
+            return False
+
+        return True
+
+    def has_unresolved_tasks(self):
+        for task in self.runtime.active_tasks:
+            if task.state in (
+                TASK_STATE_PENDING,
+                TASK_STATE_TRAVELING_TO,
+                TASK_STATE_ACTIVE,
+                TASK_STATE_WAITING_FOR_DECISION,
+                TASK_STATE_AWAITING_ACK,
+            ):
+                return True
+        return False
+
+    def has_active_field_heroes(self):
+        for hero in self.state.roster:
+            hero_state = self.runtime.hero_states.get(hero.name)
+            if hero_state is None:
+                continue
+
+            if hero_state.state in (
+                HERO_STATE_TRAVELING,
+                HERO_STATE_ON_TASK,
+                HERO_STATE_AWAITING_DECISION,
+                HERO_STATE_RETURNING,
+            ):
+                return True
+
+        return False
 
     def live_task_count(self):
         return sum(1 for task in self.runtime.active_tasks if not task.is_terminal())

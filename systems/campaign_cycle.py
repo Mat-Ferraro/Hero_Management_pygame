@@ -1,5 +1,6 @@
 from typing import Iterable, List
 
+from game_state import refresh_contract_market
 from systems.contract_lifecycle import (
     collect_expired_heroes,
     decrement_contracts_for_party,
@@ -30,6 +31,7 @@ class CampaignCycleManager:
 
         time_message = f"{CAMPAIGN_YEARS_PASSED} years pass across the realm."
         messages.append(time_message)
+        add_market_history_entry(self.state, time_message)
 
         self.state.year += CAMPAIGN_YEARS_PASSED
 
@@ -37,12 +39,14 @@ class CampaignCycleManager:
         self.state.gold += stipend
         stipend_message = f"The Crown grants the guild a {stipend}g campaign stipend."
         messages.append(stipend_message)
+        add_market_history_entry(self.state, stipend_message)
 
         messages.extend(self.advance_hero_time(participating_hero_ids))
         messages.extend(decrement_contracts_for_party(participating_heroes))
         messages.extend(self.cleanup_roster())
         messages.extend(collect_expired_heroes(self.state))
         messages.extend(advance_rival_guilds(self.state, years_passed=CAMPAIGN_YEARS_PASSED))
+        messages.extend(self.refresh_hiring_market())
 
         return [message for message in messages if message]
 
@@ -116,13 +120,9 @@ class CampaignCycleManager:
 
         for hero in self.state.roster:
             if hero.satisfaction <= 0:
-                messages.append(
-                    f"{hero.name} abandoned the guild due to low morale."
-                )
-                add_market_history_entry(
-                    self.state,
-                    f"{hero.name} abandoned the guild due to low morale.",
-                )
+                message = f"{hero.name} abandoned the guild due to low morale."
+                messages.append(message)
+                add_market_history_entry(self.state, message)
                 continue
 
             if hero.should_retire():
@@ -135,4 +135,30 @@ class CampaignCycleManager:
             remaining_roster.append(hero)
 
         self.state.roster = remaining_roster
+        return messages
+
+    def refresh_hiring_market(self) -> List[str]:
+        previous_cycle = int(getattr(self.state, "market_cycle", 1))
+        previous_remaining = len(getattr(self.state, "available_contracts", []))
+
+        refresh_contract_market(self.state)
+
+        new_cycle = int(getattr(self.state, "market_cycle", previous_cycle))
+        new_pool_size = len(getattr(self.state, "available_contracts", []))
+
+        messages = []
+
+        if previous_remaining > 0:
+            closed_message = (
+                f"The previous hiring market closed with {previous_remaining} unsigned hero(es) leaving circulation."
+            )
+            messages.append(closed_message)
+            add_market_history_entry(self.state, closed_message)
+
+        open_message = (
+            f"Hiring market cycle {new_cycle} opened with {new_pool_size} available recruit(s)."
+        )
+        messages.append(open_message)
+        add_market_history_entry(self.state, open_message)
+
         return messages
