@@ -1,7 +1,7 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from typing import Dict, List, Optional
-
-from hero_generator import generate_fallback_contract_market
 
 
 RIVAL_GUILD_DEFINITIONS: List[Dict] = [
@@ -119,14 +119,14 @@ def add_market_history_entry(state, text: str) -> None:
     if not text:
         return
 
-    state.market_history.append(text)
+    state.market_history.append(str(text))
     if len(state.market_history) > MARKET_HISTORY_LIMIT:
         state.market_history = state.market_history[-MARKET_HISTORY_LIMIT:]
 
 
 def recent_market_history(state, limit: int = 12) -> List[str]:
     ensure_rival_guild_state(state)
-    return list(state.market_history[-limit:])
+    return list(state.market_history[-max(1, int(limit)):])
 
 
 def add_hero_to_rival_guild(state, guild_name: str, hero) -> None:
@@ -150,7 +150,7 @@ def guild_power(guild: Dict) -> int:
     for hero in guild.get("roster", []):
         combat_power_fn = getattr(hero, "combat_power", None)
         if callable(combat_power_fn):
-            total += combat_power_fn()
+            total += int(combat_power_fn())
     return total
 
 
@@ -175,70 +175,89 @@ def rival_interest_reason(guild: Dict, hero) -> str:
     return ", ".join(reasons[:2])
 
 
-def _add_hero_to_market_if_missing(state, hero) -> None:
-    for existing in state.available_contracts:
+def add_hero_to_market_if_missing(state, hero) -> bool:
+    for existing in getattr(state, "available_contracts", []):
         if existing.name == hero.name:
-            return
+            return False
+
     state.available_contracts.append(hero)
+    return True
+
+
+def _log_roster_departure(state, hero_name: str, guild_name: str, reason: str) -> str:
+    message = f"{hero_name} left {guild_name} {reason}."
+    add_market_history_entry(state, message)
+    return message
+
+
+def _log_roster_addition(state, guild_name: str, hero_name: str) -> str:
+    message = f"{guild_name} added {hero_name} to strengthen its roster."
+    add_market_history_entry(state, message)
+    return message
 
 
 def advance_rival_guilds(state, years_passed: int = 2) -> List[str]:
+    from core.hero_generator import generate_fallback_contract_market
+
     ensure_rival_guild_state(state)
 
     messages: List[str] = []
+    years_passed = max(0, int(years_passed))
+
+    if years_passed <= 0:
+        return messages
 
     for guild in state.rival_guilds:
         roster = list(guild.get("roster", []))
         remaining_roster = []
 
         for hero in roster:
-            old_age = hero.age
             hero.age += years_passed
 
-            if hero.contract_years > 0:
-                hero.contract_years = max(0, hero.contract_years - 1)
+            if getattr(hero, "contract_years", 0) > 0:
+                hero.contract_years = max(0, int(hero.contract_years) - 1)
 
-            retired = False
-            should_retire = getattr(hero, "should_retire", None)
-            if callable(should_retire):
-                retired = bool(should_retire())
+            should_retire_fn = getattr(hero, "should_retire", None)
+            retired = bool(should_retire_fn()) if callable(should_retire_fn) else False
 
             if retired:
-                messages.append(f"{hero.name} retired from {guild['name']}.")
-                add_market_history_entry(state, f"{hero.name} retired from {guild['name']}.")
+                message = f"{hero.name} retired from {guild['name']}."
+                messages.append(message)
+                add_market_history_entry(state, message)
                 continue
 
-            if hero.contract_years <= 0:
-                _add_hero_to_market_if_missing(state, hero)
-                messages.append(f"{hero.name} left {guild['name']} after contract expiry.")
-                add_market_history_entry(state, f"{hero.name} left {guild['name']} after contract expiry.")
+            if getattr(hero, "contract_years", 0) <= 0:
+                add_hero_to_market_if_missing(state, hero)
+                messages.append(_log_roster_departure(state, hero.name, guild["name"], "after contract expiry"))
                 continue
 
-            if old_age != hero.age:
-                remaining_roster.append(hero)
-            else:
-                remaining_roster.append(hero)
+            remaining_roster.append(hero)
 
         guild["roster"] = remaining_roster
 
-        target_size = 3 + max(0, guild.get("prestige", 0) // 3)
+        target_size = 3 + max(0, int(guild.get("prestige", 0)) // 3)
         target_size = min(target_size, 8)
         needed = max(0, target_size - len(guild["roster"]))
+
         if needed <= 0:
             continue
 
         prospects = generate_fallback_contract_market(state, count=needed)
-        for hero in prospects[:needed]:
+
+        for hero in prospects:
+            if len(guild["roster"]) >= target_size:
+                break
+
             if any(existing.name == hero.name for existing in guild["roster"]):
                 continue
 
             guild["roster"].append(hero)
             guild["total_signings"] += 1
             guild["recent_pickups"].append(hero.name)
+
             if len(guild["recent_pickups"]) > RECENT_PICKUPS_LIMIT:
                 guild["recent_pickups"] = guild["recent_pickups"][-RECENT_PICKUPS_LIMIT:]
 
-            messages.append(f"{guild['name']} added {hero.name} to strengthen its roster.")
-            add_market_history_entry(state, f"{guild['name']} added {hero.name} to strengthen its roster.")
+            messages.append(_log_roster_addition(state, guild["name"], hero.name))
 
     return messages

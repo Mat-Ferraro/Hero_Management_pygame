@@ -1,6 +1,7 @@
 import random
 
-from game_state import create_item_pool
+from core.data_loader import load_items
+from models import Item
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
@@ -312,20 +313,18 @@ class MarketScene(SceneBase):
 
         if item not in self.shop_items:
             self.status_message = "That item is no longer available."
-            self.selected_shop_item = None
             return
 
         self.state.gold -= price
+        self.state.inventory.append(self.clone_market_item(item))
         self.shop_items.remove(item)
-        self.state.inventory.append(item)
-
         self.selected_shop_item = None
         self.sync_lists()
 
         if self.on_save_game:
             self.on_save_game()
 
-        self.status_message = f"Bought {item.name} for {price}g."
+        self.status_message = f"Purchased item."
 
     def refresh_shop(self):
         if self.state.gold < self.REFRESH_COST:
@@ -343,20 +342,18 @@ class MarketScene(SceneBase):
         self.status_message = f"Shop refreshed for {self.REFRESH_COST}g."
 
     def generate_shop_items(self):
-        item_pool = create_item_pool()
+        item_pool = load_items()
         if not item_pool:
             return []
 
         return [self.clone_market_item(random.choice(item_pool)) for _ in range(self.SHOP_SIZE)]
 
     def clone_market_item(self, item):
-        from models import Item
-
         return Item(
             name=item.name,
             slot=item.slot,
             stat_bonuses=dict(item.stat_bonuses),
-            value=item.value,
+            value=int(item.value),
             rarity=item.rarity,
             damage_type_bonus=dict(item.damage_type_bonus),
             enemy_type_bonus=dict(item.enemy_type_bonus),

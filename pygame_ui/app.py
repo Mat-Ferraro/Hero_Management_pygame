@@ -1,20 +1,18 @@
 import pygame
 
-from game_state import (
+from core.game_state import (
     campaign_is_active,
     clear_campaign_runtime,
     create_game,
     start_campaign_runtime,
     stop_campaign_runtime,
 )
-from save_system import load_game, save_exists, save_game
-from systems.campaign_cycle import CampaignCycleManager
-from systems.rival_guilds import ensure_rival_guild_state
+from core.save_system import load_game, save_exists, save_game
+from systems.guild.campaign_cycle import CampaignCycleManager
+from systems.guild.rival_guilds import ensure_rival_guild_state
 
 from pygame_ui.dev_console import DevConsole
 from pygame_ui.scenes.campaign_map_scene import CampaignMapScene
-from pygame_ui.scenes.expedition_run_scene import ExpeditionRunScene
-from pygame_ui.scenes.expedition_scene import ExpeditionScene
 from pygame_ui.scenes.game_hub_scene import GameHubScene
 from pygame_ui.scenes.guild_upgrades_scene import GuildUpgradesScene
 from pygame_ui.scenes.inventory_scene import InventoryScene
@@ -33,6 +31,7 @@ class App:
         self.running = True
         self.state = None
         self.dev_console = DevConsole(self)
+        self.scene = None
 
         self.show_main_menu()
 
@@ -76,7 +75,6 @@ class App:
         self.scene = GameHubScene(
             state=self.state,
             on_open_guild=self.show_guild,
-            on_open_expedition=self.show_expedition,
             on_open_campaign=self.show_campaign,
             on_open_inventory=self.show_inventory,
             on_open_market=self.show_market,
@@ -91,22 +89,6 @@ class App:
     def show_guild(self):
         self.scene = ManagementScene(
             state=self.state,
-            on_return_to_hub=self.show_game_hub,
-            on_save_game=self.save_current_game,
-        )
-
-    def show_expedition(self):
-        self.scene = ExpeditionScene(
-            state=self.state,
-            on_return_to_hub=self.show_game_hub,
-            on_start_expedition=self.show_expedition_run,
-        )
-
-    def show_expedition_run(self, party, dungeon):
-        self.scene = ExpeditionRunScene(
-            state=self.state,
-            party=party,
-            dungeon=dungeon,
             on_return_to_hub=self.show_game_hub,
             on_save_game=self.save_current_game,
         )
@@ -169,6 +151,9 @@ class App:
         )
 
     def show_market(self):
+        if self.state is None:
+            return
+
         if not self.state.guild_upgrades.market_unlocked:
             self.show_game_hub()
             return
@@ -180,6 +165,9 @@ class App:
         )
 
     def show_training(self):
+        if self.state is None:
+            return
+
         if self.state.guild_upgrades.training_hall_level <= 0:
             self.show_game_hub()
             return
@@ -220,14 +208,16 @@ class App:
                 if handled_by_console:
                     continue
 
-                if not self.dev_console.is_open:
+                if not self.dev_console.is_open and self.scene is not None:
                     self.scene.handle_event(event)
 
-            self.scene.update(mouse_pos)
+            if self.scene is not None:
+                self.scene.update(mouse_pos)
 
-            self.screen.fill((28, 28, 32))
-            self.scene.draw(self.screen)
-            self.dev_console.draw(self.screen)
+                self.screen.fill((28, 28, 32))
+                self.scene.draw(self.screen)
+                self.dev_console.draw(self.screen)
 
-            pygame.display.flip()
+                pygame.display.flip()
+
             self.clock.tick(60)

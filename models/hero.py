@@ -1,21 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from combat_types import damage_type_for_hero
-from growth_rates import growth_description, growth_multiplier
-from contract_attitudes import attitude_description
-from hero_specialties import specialty_description
-from systems.age_curve import (
-    age_power_multiplier,
-    career_stage,
-    career_summary,
-    mentorship_value,
-    retirement_age,
-    retirement_pressure,
-)
-from .class_rules import CLASS_RULES, STAT_NAMES
-from .item import Item
-from ui import Color, pad_col
+from core.contract_attitudes import attitude_description
+from core.growth_rates import growth_description, growth_multiplier
+from core.hero_specialties import specialty_description
+
+
+STAT_NAMES = ("might", "agility", "mind", "spirit")
 
 
 @dataclass
@@ -32,412 +25,304 @@ class Hero:
     specialty: str = "Adventurer"
     growth_rate: str = "Talented"
     contract_attitude: str = "Practical"
-    equipment: Dict[str, Item] = field(default_factory=dict)
+
+    equipment: Dict[str, object] = field(default_factory=dict)
     injured_years_remaining: int = 0
     wound_history: List[str] = field(default_factory=list)
     current_health: Optional[int] = None
     debt: int = 0
     is_temporary_survivor: bool = False
-
     satisfaction: int = 80
     participated_this_cycle: bool = False
 
     subclass: Optional[str] = None
     special_ability: Optional[str] = None
 
-    def total_stat(self, stat_name: str) -> int:
-        total = self.stats.get(stat_name, 0)
-        for item in self.equipment.values():
-            total += item.stat_bonuses.get(stat_name, 0)
-        return total
+    training_points: int = 0
+    training_path_progress: Dict[str, int] = field(default_factory=dict)
+    unlocked_subclasses: List[str] = field(default_factory=list)
+    unlocked_abilities: List[str] = field(default_factory=list)
+    primary_subclass: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self.age = int(self.age)
+        self.level = max(1, int(self.level))
+        self.xp = max(0, int(self.xp))
+        self.signing_bonus = max(0, int(self.signing_bonus))
+        self.wage_per_year = max(0, int(self.wage_per_year))
+        self.contract_years = max(0, int(self.contract_years))
+        self.injured_years_remaining = max(0, int(self.injured_years_remaining))
+        self.debt = max(0, int(self.debt))
+        self.satisfaction = max(0, min(100, int(self.satisfaction)))
+
+        normalized_stats: Dict[str, int] = {}
+        for stat_name in STAT_NAMES:
+            normalized_stats[stat_name] = max(0, int(self.stats.get(stat_name, 0)))
+        self.stats = normalized_stats
+
+        if self.current_health is not None:
+            self.current_health = max(0, int(self.current_health))
+
+        self.training_points = max(0, int(self.training_points))
+        self.training_path_progress = {
+            str(path_name): max(0, int(rank))
+            for path_name, rank in dict(self.training_path_progress).items()
+        }
+        self.unlocked_subclasses = [str(value) for value in self.unlocked_subclasses]
+        self.unlocked_abilities = [str(value) for value in self.unlocked_abilities]
+        self.wound_history = [str(value) for value in self.wound_history]
+
+    def stat_total(self) -> int:
+        return sum(int(self.stats.get(stat_name, 0)) for stat_name in STAT_NAMES)
 
     def max_health(self) -> int:
-        return 60 + (self.total_stat("might") * 4) + (self.total_stat("spirit") * 3) + (self.level * 8)
+        base = 40
+        base += self.level * 6
+        base += int(self.stats.get("might", 0)) * 2
+        base += int(self.stats.get("spirit", 0))
+
+        if self.hero_class == "Warrior":
+            base += 8
+        elif self.hero_class == "Cleric":
+            base += 4
+        elif self.hero_class == "Mage":
+            base -= 2
+
+        return max(1, base)
 
     def reset_health_for_expedition(self) -> None:
         self.current_health = self.max_health()
 
-    def heal(self, amount: int) -> str:
-        if self.current_health is None:
-            self.reset_health_for_expedition()
-
-        before = self.current_health
-        self.current_health = min(self.max_health(), self.current_health + amount)
-        healed = self.current_health - before
-        return f"{self.name} recovered {healed} HP ({self.current_health}/{self.max_health()} HP)."
-
     def health_percent(self) -> float:
         if self.current_health is None:
             return 1.0
-        return max(0.0, self.current_health / self.max_health())
+
+        maximum = self.max_health()
+        if maximum <= 0:
+            return 0.0
+
+        return max(0.0, min(1.0, float(self.current_health) / float(maximum)))
 
     def health_status(self) -> str:
-        percent = self.health_percent()
-        if percent <= 0:
+        if self.current_health is None:
+            return "HEALTHY"
+
+        if self.current_health <= 0:
             return "DEAD"
-        if percent < 0.25:
+
+        ratio = self.health_percent()
+        if ratio <= 0.10:
             return "CRITICAL"
-        if percent < 0.50:
+        if ratio <= 0.35:
             return "WOUNDED"
-        if percent < 0.75:
+        if ratio <= 0.65:
             return "HURT"
-        return "Healthy"
-
-    def career_stage(self) -> str:
-        return career_stage(self)
-
-    def age_power_multiplier(self) -> float:
-        return age_power_multiplier(self)
-
-    def mentorship_value(self) -> int:
-        return mentorship_value(self)
-
-    def retirement_age(self) -> int:
-        return retirement_age(self)
-
-    def satisfaction_label(self) -> str:
-        if self.satisfaction >= 80:
-            return "Happy"
-        if self.satisfaction >= 50:
-            return "Content"
-        if self.satisfaction >= 25:
-            return "Unhappy"
-        if self.satisfaction > 0:
-            return "Leaving Soon"
-        return "Leaving"
-
-    def adjust_satisfaction(self, amount: int, reason: str = "") -> str:
-        old_value = self.satisfaction
-        self.satisfaction = max(0, min(100, self.satisfaction + amount))
-
-        if amount == 0:
-            return ""
-
-        sign = "+" if amount > 0 else ""
-        reason_text = f" ({reason})" if reason else ""
-        return (
-            f"{self.name} satisfaction {sign}{amount}: "
-            f"{old_value} -> {self.satisfaction} "
-            f"[{self.satisfaction_label()}]{reason_text}."
-        )
-
-    def total_contract_value(self) -> int:
-        return self.signing_bonus + (self.wage_per_year * self.contract_years)
+        return "HEALTHY"
 
     def combat_power(self) -> int:
-        class_rules = CLASS_RULES[self.hero_class]
+        might = int(self.stats.get("might", 0))
+        agility = int(self.stats.get("agility", 0))
+        mind = int(self.stats.get("mind", 0))
+        spirit = int(self.stats.get("spirit", 0))
 
-        primary = sum(self.total_stat(stat) * 3 for stat in class_rules["primary_stats"])
-        secondary = sum(self.total_stat(stat) * 2 for stat in class_rules["secondary_stats"])
-        general = sum(self.total_stat(stat) for stat in STAT_NAMES)
-
-        raw_power = primary + secondary + general + self.level * 5
-
-        injury_penalty = 0.65 if self.injured_years_remaining > 0 else 1.0
-        age_multiplier = self.age_power_multiplier()
-
-        subclass_bonus = 1.0
-        if self.subclass:
-            subclass_bonus += 0.04
-
-        ability_bonus = 1.0
-        if self.special_ability:
-            ability_bonus += 0.03
-
-        return max(1, int(raw_power * injury_penalty * age_multiplier * subclass_bonus * ability_bonus))
-
-    def damage_type(self) -> str:
-        return damage_type_for_hero(self)
-
-    def growth_multiplier(self) -> float:
-        return growth_multiplier(self.growth_rate)
-
-    def xp_to_next_level(self) -> int:
-        return 100 + (self.level - 1) * 60
-
-    def add_xp(self, amount: int) -> List[str]:
-        messages = []
-        adjusted_amount = self.adjust_xp_for_age(amount)
-        self.xp += adjusted_amount
-        messages.append(f"{self.name} gained {adjusted_amount} XP.")
-
-        while self.xp >= self.xp_to_next_level():
-            self.xp -= self.xp_to_next_level()
-            self.level += 1
-            messages.extend(self.level_up())
-
-        return messages
-
-    def adjust_xp_for_age(self, base_xp: int) -> int:
-        stage = self.career_stage()
-
-        if stage == "Developing":
-            multiplier = 1.20
-        elif stage == "Prime":
-            multiplier = 1.00
-        elif stage == "Veteran":
-            multiplier = 0.85
+        if self.hero_class == "Warrior":
+            primary = (might * 3) + spirit
+        elif self.hero_class == "Rogue":
+            primary = (agility * 3) + mind
+        elif self.hero_class == "Cleric":
+            primary = (spirit * 3) + mind
         else:
-            if self.hero_class == "Mage":
-                multiplier = 1.05
-            else:
-                multiplier = 0.65
+            primary = (mind * 3) + spirit
 
-        return max(1, int(base_xp * multiplier * self.growth_multiplier()))
+        general = might + agility + mind + spirit
+        gear_bonus = sum(
+            sum(int(value) for value in getattr(item, "stat_bonuses", {}).values())
+            for item in self.equipment.values()
+        )
 
-    def level_up(self) -> List[str]:
-        import random
+        base_power = primary + general + gear_bonus + (self.level * 4)
+        scaled_power = int(round(base_power * growth_multiplier(self.growth_rate)))
 
-        messages = [f"{self.name} reached level {self.level}!"]
+        if self.injured_years_remaining > 0:
+            scaled_power = int(round(scaled_power * 0.85))
 
-        class_rules = CLASS_RULES[self.hero_class]
-
-        for stat in class_rules["primary_stats"]:
-            self.stats[stat] += 2
-            messages.append(f"  +2 {stat}")
-
-        for stat in class_rules["secondary_stats"]:
-            self.stats[stat] += 1
-            messages.append(f"  +1 {stat}")
-
-        random_stat = random.choice(STAT_NAMES)
-        self.stats[random_stat] += 1
-        messages.append(f"  +1 {random_stat}")
-
-        return messages
+        return max(1, scaled_power)
 
     def take_damage(self, amount: int) -> str:
+        damage = max(0, int(amount))
+
         if self.current_health is None:
             self.reset_health_for_expedition()
 
-        self.current_health = max(0, self.current_health - amount)
+        assert self.current_health is not None
+        old_health = self.current_health
+        self.current_health = max(0, self.current_health - damage)
+
         return (
-            f"{self.name} took {amount} damage "
-            f"({self.current_health}/{self.max_health()} HP, {self.health_status()})."
+            f"{self.name} takes {damage} damage "
+            f"({old_health}->{self.current_health}/{self.max_health()} HP)."
+        )
+
+    def heal(self, amount: int) -> str:
+        healing = max(0, int(amount))
+
+        if self.current_health is None:
+            self.reset_health_for_expedition()
+
+        assert self.current_health is not None
+        old_health = self.current_health
+        self.current_health = min(self.max_health(), self.current_health + healing)
+
+        gained = self.current_health - old_health
+        return (
+            f"{self.name} heals {gained} HP "
+            f"({old_health}->{self.current_health}/{self.max_health()} HP)."
         )
 
     def apply_minor_wound(self) -> str:
-        import random
-
-        duration_years = random.randint(1, 2)
-        self.injured_years_remaining = max(self.injured_years_remaining, duration_years)
-        wound = f"Minor wound: injured for {duration_years} year(s)"
-        self.wound_history.append(wound)
-        return f"{self.name} suffered a minor wound and will need {duration_years} year(s) to recover."
+        self.injured_years_remaining = max(self.injured_years_remaining, 1)
+        self.wound_history.append("Minor wound")
+        return f"{self.name} suffered a minor wound."
 
     def apply_mortal_wound(self) -> str:
-        import random
+        self.injured_years_remaining = max(self.injured_years_remaining, 2)
+        self.wound_history.append("Mortal wound")
+        return f"{self.name} suffered a mortal wound."
 
-        stat = random.choice(STAT_NAMES)
-        loss = random.randint(1, 2)
-        actual_loss = min(loss, max(0, self.stats[stat] - 1))
-        self.stats[stat] -= actual_loss
+    def adjust_satisfaction(self, delta: int, reason: str = "") -> int:
+        old_value = self.satisfaction
+        self.satisfaction = max(0, min(100, self.satisfaction + int(delta)))
+        return self.satisfaction - old_value
 
-        duration_years = random.randint(2, 4)
-        self.injured_years_remaining = max(self.injured_years_remaining, duration_years)
+    def xp_to_next_level(self) -> int:
+        return 100 + ((self.level - 1) * 50)
 
-        wound = f"Mortal wound: -{actual_loss} {stat}, injured for {duration_years} year(s)"
-        self.wound_history.append(wound)
-        return f"{self.name} suffered a mortal wound: -{actual_loss} {stat}, {duration_years} year recovery."
+    def add_xp(self, amount: int) -> List[str]:
+        gained = max(0, int(amount))
+        messages: List[str] = []
 
-    def advance_time(self, years_passed: int) -> List[str]:
-        messages = []
+        if gained <= 0:
+            return messages
 
-        self.contract_years -= years_passed
+        self.xp += gained
+        messages.append(f"{self.name} gained {gained} XP.")
 
-        if self.injured_years_remaining > 0:
-            old_injury_years = self.injured_years_remaining
-            self.injured_years_remaining = max(0, self.injured_years_remaining - years_passed)
-
-            if self.injured_years_remaining == 0:
-                messages.append(f"{self.name} recovered from injury after {old_injury_years} remaining year(s).")
-            else:
-                messages.append(f"{self.name} is still injured for {self.injured_years_remaining} more year(s).")
-
-        old_age = self.age
-        self.age += years_passed
-        messages.append(f"{self.name} aged from {old_age} to {self.age}.")
+        while self.xp >= self.xp_to_next_level():
+            needed = self.xp_to_next_level()
+            self.xp -= needed
+            self.level += 1
+            messages.extend(self._apply_level_up())
 
         return messages
 
-    def apply_aging(self, years_passed: int) -> List[str]:
-        old_age = self.age
-        self.age += years_passed
-        return [f"{self.name} aged from {old_age} to {self.age}."]
+    def _apply_level_up(self) -> List[str]:
+        messages = [f"{self.name} reached level {self.level}!"]
 
-    def retirement_chance(self) -> float:
-        return retirement_pressure(self)
+        if self.hero_class == "Warrior":
+            priority = ["might", "spirit"]
+        elif self.hero_class == "Rogue":
+            priority = ["agility", "mind"]
+        elif self.hero_class == "Cleric":
+            priority = ["spirit", "mind"]
+        else:
+            priority = ["mind", "spirit"]
+
+        self.stats[priority[0]] = self.stats.get(priority[0], 0) + 1
+        self.stats[priority[1]] = self.stats.get(priority[1], 0) + 1
+        messages.append(
+            f"{self.name}'s {priority[0]} and {priority[1]} improved."
+        )
+
+        self.reset_health_for_expedition()
+        return messages
+
+    def advance_time(self, years: int) -> List[str]:
+        elapsed = max(0, int(years))
+        messages: List[str] = []
+
+        if elapsed <= 0:
+            return messages
+
+        self.age += elapsed
+
+        if self.injured_years_remaining > 0:
+            old_value = self.injured_years_remaining
+            self.injured_years_remaining = max(0, self.injured_years_remaining - elapsed)
+            if old_value > 0 and self.injured_years_remaining == 0:
+                messages.append(f"{self.name} has recovered from injuries.")
+
+        return messages
 
     def should_retire(self) -> bool:
-        import random
+        if self.hero_class == "Warrior":
+            return self.age >= 52
+        if self.hero_class == "Rogue":
+            return self.age >= 55
+        if self.hero_class == "Cleric":
+            return self.age >= 70
+        if self.hero_class == "Mage":
+            return self.age >= 88
+        return self.age >= 60
 
-        return random.random() < self.retirement_chance()
+    def mentorship_value(self) -> int:
+        if self.level >= 7:
+            return 3
+        if self.level >= 5:
+            return 2
+        if self.level >= 3:
+            return 1
+        return 0
 
-    def display_short(self, use_color: bool = True, include_money: bool = False) -> str:
-        survivor_text = "TEMP" if self.is_temporary_survivor else ""
+    def display_short(self) -> str:
+        health_text = ""
+        if self.current_health is not None:
+            health_text = f" | HP {self.current_health}/{self.max_health()} | {self.health_status()}"
 
-        injury_text = ""
-        if self.injured_years_remaining > 0:
-            injury_text = f"INJ {self.injured_years_remaining}y"
-
-        debt_text = ""
-        if self.debt > 0:
-            debt_text = f"{self.debt}g"
-
-        if self.current_health is None:
-            hp_text = f"{self.max_health()}/{self.max_health()}"
-            hp_status = "Healthy"
-        else:
-            hp_text = f"{self.current_health}/{self.max_health()}"
-            hp_status = self.health_status()
-
-        damage_text = self.damage_type()
-        expedition_cost_text = f"{self.wage_per_year}g"
-        satisfaction_text = f"{self.satisfaction}"
-        subclass_text = self.subclass or "None"
-
-        class_col = None
-        damage_col = None
-        growth_col = None
-        terms_col = None
-        status_col = None
-        cost_col = None
-        satisfaction_col = None
-
-        if use_color:
-            class_col = {
-                "Warrior": Color.RED,
-                "Rogue": Color.GREEN,
-                "Cleric": Color.CYAN,
-                "Mage": Color.MAGENTA,
-            }.get(self.hero_class, Color.WHITE)
-
-            damage_col = {
-                "Physical": Color.YELLOW,
-                "Magic": Color.MAGENTA,
-                "Holy": Color.CYAN,
-            }.get(damage_text, Color.WHITE)
-
-            growth_col = {
-                "Mundane": Color.DIM,
-                "Talented": Color.WHITE,
-                "Gifted": Color.GREEN,
-                "Heroic": Color.CYAN,
-                "Legendary": Color.MAGENTA,
-                "Mythic": Color.RED,
-            }.get(self.growth_rate, Color.WHITE)
-
-            terms_col = {
-                "Modest": Color.GREEN,
-                "Practical": Color.WHITE,
-                "Ambitious": Color.YELLOW,
-                "Mercenary": Color.RED,
-                "Noble": Color.CYAN,
-            }.get(self.contract_attitude, Color.WHITE)
-
-            status_col = {
-                "DEAD": Color.RED,
-                "CRITICAL": Color.RED,
-                "WOUNDED": Color.YELLOW,
-                "HURT": Color.YELLOW,
-                "Healthy": Color.GREEN,
-            }.get(hp_status, Color.WHITE)
-
-            if self.wage_per_year >= 50:
-                cost_col = Color.RED
-            elif self.wage_per_year >= 30:
-                cost_col = Color.YELLOW
-            else:
-                cost_col = Color.GREEN
-
-            if self.satisfaction >= 75:
-                satisfaction_col = Color.GREEN
-            elif self.satisfaction >= 35:
-                satisfaction_col = Color.YELLOW
-            else:
-                satisfaction_col = Color.RED
-
-        columns = [
-            pad_col(self.name, 18),
-            pad_col(self.hero_class, 8, class_col),
-            pad_col(subclass_text, 12),
-            pad_col(self.specialty, 16),
-            pad_col(damage_text, 8, damage_col),
-            pad_col(self.growth_rate, 9, growth_col),
-            pad_col(self.contract_attitude, 10, terms_col),
-            pad_col(self.age, 3, align="right"),
-            pad_col(self.career_stage(), 10),
-            pad_col(f"Lv {self.level}", 5),
-            pad_col(self.combat_power(), 5, align="right"),
-            pad_col(hp_text, 9, align="right"),
-            pad_col(hp_status, 17, status_col),
-            pad_col(expedition_cost_text, 8, cost_col, align="right"),
-            pad_col(satisfaction_text, 5, satisfaction_col, align="right"),
-        ]
-
-        if include_money:
-            signing_col = None
-            total_col = None
-
-            if use_color:
-                if self.signing_bonus >= 275:
-                    signing_col = Color.RED
-                elif self.signing_bonus >= 175:
-                    signing_col = Color.YELLOW
-                else:
-                    signing_col = Color.GREEN
-
-                total_value = self.total_contract_value()
-                if total_value >= 700:
-                    total_col = Color.RED
-                elif total_value >= 400:
-                    total_col = Color.YELLOW
-                else:
-                    total_col = Color.GREEN
-
-            columns.extend(
-                [
-                    pad_col(f"{self.signing_bonus}g", 14, signing_col, align="right"),
-                    pad_col(f"{self.total_contract_value()}g", 15, total_col, align="right"),
-                ]
-            )
-
-        if debt_text:
-            columns.append(pad_col(debt_text, 10, Color.RED if use_color else None))
-
-        if survivor_text:
-            columns.append(pad_col(survivor_text, 5))
-
-        if injury_text:
-            columns.append(pad_col(injury_text, 10, Color.YELLOW if use_color else None))
-
-        return " | ".join(columns)
-
-    def display_contract(self, use_color: bool = True) -> str:
-        return self.display_short(use_color=use_color, include_money=True)
-
-    def display_full(self) -> str:
-        stat_text = ", ".join(f"{stat}: {self.total_stat(stat)}" for stat in STAT_NAMES)
-        equipped = ", ".join(f"{slot}: {item.name}" for slot, item in self.equipment.items()) or "None"
-        wounds = "; ".join(self.wound_history) or "None"
-        retire_chance = self.retirement_chance() * 100
+        subclass_text = f" | {self.subclass}" if self.subclass else ""
+        ability_text = f" | {self.special_ability}" if self.special_ability else ""
 
         return (
-            f"{self.display_short()}\n"
-            f"  Class: {self.hero_class}\n"
-            f"  Subclass: {self.subclass or 'None'}\n"
-            f"  Special Ability: {self.special_ability or 'None'}\n"
-            f"  Career: {career_summary(self)}\n"
-            f"  Mentorship Value: {self.mentorship_value()}\n"
-            f"  Specialty: {self.specialty} - {specialty_description(self.specialty)}\n"
-            f"  Growth Rate: {self.growth_rate} (x{self.growth_multiplier():.2f}) - {growth_description(self.growth_rate)}\n"
-            f"  Contract Attitude: {self.contract_attitude} - {attitude_description(self.contract_attitude)}\n"
-            f"  Satisfaction: {self.satisfaction}/100 ({self.satisfaction_label()})\n"
-            f"  Damage Type: {self.damage_type()}\n"
-            f"  XP: {self.xp}/{self.xp_to_next_level()}\n"
-            f"  Stats: {stat_text}\n"
-            f"  Equipment: {equipped}\n"
-            f"  Wounds: {wounds}\n"
-            f"  Debt: {self.debt}g\n"
-            f"  Retirement Chance After Time Passes: {retire_chance:.1f}%\n"
+            f"{self.name} | {self.hero_class} Lv{self.level}{subclass_text}{ability_text} | "
+            f"Age {self.age} | "
+            f"M {self.stats.get('might', 0)} "
+            f"A {self.stats.get('agility', 0)} "
+            f"Mi {self.stats.get('mind', 0)} "
+            f"S {self.stats.get('spirit', 0)} | "
+            f"{self.specialty} | {self.growth_rate}{health_text}"
         )
+
+    def display(self) -> str:
+        equipment_names = ", ".join(item.name for item in self.equipment.values()) or "None"
+
+        lines = [
+            f"Name: {self.name}",
+            f"Class: {self.hero_class}",
+            f"Level: {self.level}",
+            f"Age: {self.age}",
+            f"Stats: {self.stats}",
+            f"Combat Power: {self.combat_power()}",
+            f"Specialty: {self.specialty} - {specialty_description(self.specialty)}",
+            f"Growth: {self.growth_rate} - {growth_description(self.growth_rate)}",
+            f"Contract Attitude: {self.contract_attitude} - {attitude_description(self.contract_attitude)}",
+            f"Signing Bonus: {self.signing_bonus}g",
+            f"Wage: {self.wage_per_year}g",
+            f"Contract Years: {self.contract_years}",
+            f"Debt: {self.debt}g",
+            f"Satisfaction: {self.satisfaction}",
+            f"Equipment: {equipment_names}",
+        ]
+
+        if self.subclass:
+            lines.append(f"Subclass: {self.subclass}")
+        if self.primary_subclass:
+            lines.append(f"Primary Subclass: {self.primary_subclass}")
+        if self.special_ability:
+            lines.append(f"Special Ability: {self.special_ability}")
+        if self.unlocked_subclasses:
+            lines.append(f"Unlocked Subclasses: {', '.join(self.unlocked_subclasses)}")
+        if self.unlocked_abilities:
+            lines.append(f"Unlocked Abilities: {', '.join(self.unlocked_abilities)}")
+        if self.wound_history:
+            lines.append(f"Wound History: {', '.join(self.wound_history)}")
+
+        return "\n".join(lines)

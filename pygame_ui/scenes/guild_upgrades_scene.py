@@ -11,7 +11,7 @@ from pygame_ui.widgets.status_chip import StatusChip
 from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
-from systems.guild_upgrades import available_upgrades, buy_upgrade
+from systems.guild.guild_upgrades import available_upgrades, buy_upgrade
 
 
 class GuildUpgradesScene(SceneBase):

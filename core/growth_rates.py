@@ -2,6 +2,9 @@ import random
 from typing import Dict
 
 
+DEFAULT_GROWTH_RATE = "Talented"
+
+
 GROWTH_RATE_MULTIPLIERS: Dict[str, float] = {
     "Mundane": 0.80,
     "Talented": 1.00,
@@ -22,30 +25,33 @@ GROWTH_RATE_DESCRIPTIONS: Dict[str, str] = {
 }
 
 
+GROWTH_RATE_WEIGHTS: Dict[str, int] = {
+    "Mundane": 40,
+    "Talented": 30,
+    "Gifted": 18,
+    "Heroic": 8,
+    "Legendary": 3,
+    "Mythic": 1,
+}
+
+
 def growth_multiplier(growth_rate: str) -> float:
-    return GROWTH_RATE_MULTIPLIERS.get(growth_rate, 1.0)
+    return float(
+        GROWTH_RATE_MULTIPLIERS.get(
+            growth_rate,
+            GROWTH_RATE_MULTIPLIERS[DEFAULT_GROWTH_RATE],
+        )
+    )
 
 
 def growth_description(growth_rate: str) -> str:
-    return GROWTH_RATE_DESCRIPTIONS.get(growth_rate, "Unknown growth potential.")
+    return GROWTH_RATE_DESCRIPTIONS.get(
+        growth_rate,
+        "Unknown growth potential.",
+    )
 
 
 def random_growth_rate() -> str:
-    roll = random.random()
-
-    if roll < 0.40:
-        return "Mundane"
-
-    if roll < 0.70:
-        return "Talented"
-
-    if roll < 0.88:
-        return "Gifted"
-
-    if roll < 0.96:
-        return "Heroic"
-
-    if roll < 0.995:
-        return "Legendary"
-
-    return "Mythic"
+    growth_rates = list(GROWTH_RATE_WEIGHTS.keys())
+    weights = list(GROWTH_RATE_WEIGHTS.values())
+    return random.choices(growth_rates, weights=weights, k=1)[0]

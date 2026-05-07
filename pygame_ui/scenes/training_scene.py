@@ -13,9 +13,9 @@ from pygame_ui.widgets.text_block import TextBlock
 from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from pygame_ui.widgets.scrollable_text_panel import ScrollableTextPanel
-from systems.hero_career import career_phase_name, career_phase_summary
-from systems.hero_progression import ensure_progression_fields
-from systems.training_system import (
+from systems.progression.hero_career import career_phase_name, career_phase_summary
+from systems.progression.hero_progression import ensure_progression_fields
+from systems.progression.hero_training import (
     can_specialize_hero,
     can_train_hero,
     specialize_hero,
@@ -139,6 +139,12 @@ class TrainingScene(SceneBase):
                 ("Roster", len(self.state.roster)),
             ],
             spacing=220,
+            item_max_width=180,
+            font_size=24,
+            label_color=theme.TEXT_MUTED,
+            value_color=theme.TEXT_PRIMARY,
+            label_bold=False,
+            value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
@@ -403,11 +409,19 @@ class TrainingScene(SceneBase):
                 reward_text = self.next_rank_summary(hero, path_name)
                 reason_text = "Spend 1 TP" if can_spec else reason
                 screen.blit(
-                    self.small_font.render(truncate_text(reward_text, self.small_font, rect.width - 24), True, theme.TEXT_SECONDARY),
+                    self.small_font.render(
+                        truncate_text(reward_text, self.small_font, rect.width - 24),
+                        True,
+                        theme.TEXT_SECONDARY,
+                    ),
                     (rect.x + 12, rect.y + 62),
                 )
                 screen.blit(
-                    self.small_font.render(truncate_text(reason_text, self.small_font, rect.width - 24), True, theme.TEXT_MUTED),
+                    self.small_font.render(
+                        truncate_text(reason_text, self.small_font, rect.width - 24),
+                        True,
+                        theme.TEXT_MUTED,
+                    ),
                     (rect.x + 12, rect.y + 82),
                 )
 

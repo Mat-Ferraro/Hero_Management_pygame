@@ -1,12 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-from data_loader import load_dungeons, load_items
-from hero_generator import generate_contract_market
-from manager_reputation import ManagerReputation
-from models import Dungeon, Hero, Item
-from systems.guild_upgrades import GuildUpgrades
-from systems.rival_guilds import ensure_rival_guild_state
+from .hero_generator import generate_contract_market
+from .manager_reputation import ManagerReputation
+from models import Hero, Item
+from systems.guild.guild_upgrades import GuildUpgrades
+from systems.guild.rival_guilds import ensure_rival_guild_state
 
 
 SEASONAL_MARKET_POOL_SIZE = 30
@@ -24,10 +23,10 @@ class GameState:
     expedition: int
     year: int
     gold: int
+
     roster: List[Hero]
     available_contracts: List[Hero]
     inventory: List[Item]
-    dungeons: List[Dungeon]
 
     retired_heroes: List[Hero] = field(default_factory=list)
     fallen_heroes: List[Hero] = field(default_factory=list)
@@ -52,23 +51,10 @@ class GameState:
     campaign_runtime: Any | None = None
 
 
-def create_dungeons() -> List[Dungeon]:
-    return load_dungeons()
-
-
-def create_item_pool() -> List[Item]:
-    return load_items()
-
-
-def available_dungeons_for_state(state: GameState) -> List[Dungeon]:
-    return [
-        dungeon
-        for dungeon in state.dungeons
-        if dungeon.difficulty <= state.guild_upgrades.mission_difficulty_cap
-    ]
-
-
-def start_contract_market_cycle(state: GameState, pool_size: int = SEASONAL_MARKET_POOL_SIZE) -> None:
+def start_contract_market_cycle(
+    state: GameState,
+    pool_size: int = SEASONAL_MARKET_POOL_SIZE,
+) -> None:
     state.contract_offers = []
     state.renewal_offers = []
     state.contract_round = 1
@@ -87,12 +73,14 @@ def start_contract_market_cycle(state: GameState, pool_size: int = SEASONAL_MARK
 
 
 def retire_unclaimed_market_heroes(state: GameState) -> None:
-    if not getattr(state, "available_contracts", []):
+    remaining = list(getattr(state, "available_contracts", []) or [])
+
+    if not remaining:
+        state.available_contracts = []
         state.seasonal_contract_pool = []
         state.market_closed = True
         return
 
-    remaining = list(state.available_contracts)
     state.retired_heroes.extend(remaining)
     state.available_contracts = []
     state.seasonal_contract_pool = []
@@ -116,19 +104,21 @@ def campaign_is_active(state: GameState) -> bool:
     if runtime is None:
         return False
 
-    return bool(getattr(runtime, "is_active", False))
+    return bool(getattr(runtime, "active", False))
 
 
 def start_campaign_runtime(state: GameState):
-    from systems.campaign.campaign_runtime import CampaignRuntime
+    from systems.campaign.campaign_runtime import create_campaign_runtime
 
     runtime = getattr(state, "campaign_runtime", None)
-    if runtime is not None and getattr(runtime, "is_active", False):
+
+    if runtime is None:
+        runtime = create_campaign_runtime()
+        state.campaign_runtime = runtime
         return runtime
 
-    runtime = CampaignRuntime()
-    runtime.is_active = True
-    state.campaign_runtime = runtime
+    runtime.active = True
+    runtime.paused = False
     return runtime
 
 
@@ -137,7 +127,7 @@ def stop_campaign_runtime(state: GameState) -> None:
     if runtime is None:
         return
 
-    runtime.is_active = False
+    runtime.active = False
 
 
 def clear_campaign_runtime(state: GameState) -> None:
@@ -152,7 +142,6 @@ def create_game() -> GameState:
         roster=[],
         available_contracts=[],
         inventory=[],
-        dungeons=create_dungeons(),
         retired_heroes=[],
         fallen_heroes=[],
         reputation=ManagerReputation(),

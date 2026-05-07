@@ -1,12 +1,16 @@
 from typing import List
 
-from systems.contract_negotiation import (
+from systems.guild.rival_guilds import add_market_history_entry
+
+from .market_state import (
     ensure_contract_state,
-    evaluate_renewal_offer_score,
     get_renewal_offer_for_hero,
+)
+from .contract_negotiation import default_renewal_offer_for_hero
+from .offer_scoring import (
+    evaluate_renewal_offer_score,
     renewal_acceptance_threshold,
 )
-from systems.rival_guilds import add_market_history_entry
 
 
 def ensure_contract_fields(hero) -> None:
@@ -43,6 +47,13 @@ def decrement_contracts_for_party(party) -> List[str]:
 def is_expiring_hero(hero) -> bool:
     ensure_contract_fields(hero)
     return hero.contract_years <= 1
+
+
+def _add_hero_to_market_if_missing(state, hero) -> None:
+    for existing in state.available_contracts:
+        if existing.name == hero.name:
+            return
+    state.available_contracts.append(hero)
 
 
 def resolve_renewals_and_expirations(state) -> List[str]:
@@ -133,8 +144,10 @@ def expired_contract_count(state) -> int:
     return count
 
 
-def _add_hero_to_market_if_missing(state, hero) -> None:
-    for existing in state.available_contracts:
-        if existing.name == hero.name:
-            return
-    state.available_contracts.append(hero)
+def renewal_offer_summary(state, hero):
+    offer = get_renewal_offer_for_hero(state, hero)
+    if offer is None:
+        default_offer = default_renewal_offer_for_hero(state, hero)
+        return default_offer["offered_campaigns"], default_offer["offered_signing_fee"]
+
+    return int(offer["offered_campaigns"]), int(offer["offered_signing_fee"])

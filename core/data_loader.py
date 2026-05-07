@@ -1,23 +1,23 @@
 import json
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
-from contract_attitudes import random_contract_attitude
-from growth_rates import random_growth_rate
-from hero_specialties import random_specialty_for_class
-from models import Dungeon, Hero, Item
+from .contract_attitudes import random_contract_attitude
+from .growth_rates import random_growth_rate
+from .hero_specialties import random_specialty_for_class
+from models import Hero, Item
 
 
 DATA_DIR = Path("data")
+
 HEROES_PATH = DATA_DIR / "heroes.json"
-DUNGEONS_PATH = DATA_DIR / "dungeons.json"
 ITEMS_PATH = DATA_DIR / "items.json"
 EVENTS_PATH = DATA_DIR / "events.json"
 HERO_NAMES_PATH = DATA_DIR / "hero_names.json"
 HERO_GENERATION_RULES_PATH = DATA_DIR / "hero_generation_rules.json"
 
 
-def load_json_file(path: Path):
+def load_json_file(path: Path) -> Any:
     if not path.exists():
         raise FileNotFoundError(f"Required data file not found: {path}")
 
@@ -25,8 +25,8 @@ def load_json_file(path: Path):
         return json.load(data_file)
 
 
-def hero_from_data(data: dict) -> Hero:
-    hero_class = data["hero_class"]
+def hero_from_data(data: Dict[str, Any]) -> Hero:
+    hero_class = str(data["hero_class"])
 
     return Hero(
         name=data["name"],
@@ -44,7 +44,7 @@ def hero_from_data(data: dict) -> Hero:
     )
 
 
-def item_from_data(data: dict) -> Item:
+def item_from_data(data: Dict[str, Any]) -> Item:
     return Item(
         name=data["name"],
         slot=data["slot"],
@@ -59,24 +59,6 @@ def item_from_data(data: dict) -> Item:
     )
 
 
-def dungeon_from_data(data: dict) -> Dungeon:
-    return Dungeon(
-        name=data["name"],
-        difficulty=int(data["difficulty"]),
-        years_to_complete=int(data["years_to_complete"]),
-        stages=int(data.get("stages", data["years_to_complete"])),
-        enemy_power=int(data["enemy_power"]),
-        loot_min=int(data["loot_min"]),
-        loot_max=int(data["loot_max"]),
-        xp_reward=int(data["xp_reward"]),
-        minor_wound_chance=float(data["minor_wound_chance"]),
-        mortal_wound_chance=float(data["mortal_wound_chance"]),
-        death_chance=float(data["death_chance"]),
-        item_drop_chance=float(data["item_drop_chance"]),
-        enemy_type=data.get("enemy_type", "Beasts"),
-    )
-
-
 def load_heroes() -> List[Hero]:
     return [hero_from_data(hero_data) for hero_data in load_json_file(HEROES_PATH)]
 
@@ -85,22 +67,22 @@ def load_items() -> List[Item]:
     return [item_from_data(item_data) for item_data in load_json_file(ITEMS_PATH)]
 
 
-def load_dungeons() -> List[Dungeon]:
-    return [dungeon_from_data(dungeon_data) for dungeon_data in load_json_file(DUNGEONS_PATH)]
-
-
-
-def load_events() -> list:
+def load_events() -> List[Dict[str, Any]]:
     if not EVENTS_PATH.exists():
         return []
 
-    return load_json_file(EVENTS_PATH)
+    raw = load_json_file(EVENTS_PATH)
+    if not isinstance(raw, list):
+        return []
+
+    return [dict(event) for event in raw]
 
 
+def load_hero_names() -> Dict[str, Any]:
+    raw = load_json_file(HERO_NAMES_PATH)
+    return dict(raw)
 
-def load_hero_names() -> dict:
-    return load_json_file(HERO_NAMES_PATH)
 
-
-def load_hero_generation_rules() -> dict:
-    return load_json_file(HERO_GENERATION_RULES_PATH)
+def load_hero_generation_rules() -> Dict[str, Any]:
+    raw = load_json_file(HERO_GENERATION_RULES_PATH)
+    return dict(raw)

@@ -2,6 +2,9 @@ import random
 from typing import Dict
 
 
+DEFAULT_CONTRACT_ATTITUDE = "Practical"
+
+
 CONTRACT_ATTITUDE_MULTIPLIERS: Dict[str, Dict[str, float]] = {
     "Modest": {
         "signing_bonus": 0.85,
@@ -35,39 +38,48 @@ CONTRACT_ATTITUDE_DESCRIPTIONS: Dict[str, str] = {
 }
 
 
+CONTRACT_ATTITUDE_WEIGHTS: Dict[str, int] = {
+    "Modest": 20,
+    "Practical": 42,
+    "Ambitious": 20,
+    "Mercenary": 12,
+    "Noble": 6,
+}
+
+
 def random_contract_attitude() -> str:
-    roll = random.random()
-
-    if roll < 0.20:
-        return "Modest"
-
-    if roll < 0.62:
-        return "Practical"
-
-    if roll < 0.82:
-        return "Ambitious"
-
-    if roll < 0.94:
-        return "Mercenary"
-
-    return "Noble"
+    attitudes = list(CONTRACT_ATTITUDE_WEIGHTS.keys())
+    weights = list(CONTRACT_ATTITUDE_WEIGHTS.values())
+    return random.choices(attitudes, weights=weights, k=1)[0]
 
 
 def attitude_description(contract_attitude: str) -> str:
-    return CONTRACT_ATTITUDE_DESCRIPTIONS.get(contract_attitude, "Unknown contract attitude.")
+    return CONTRACT_ATTITUDE_DESCRIPTIONS.get(
+        contract_attitude,
+        "Unknown contract attitude.",
+    )
+
+
+def goodwill_score(reputation) -> float:
+    if reputation is None:
+        return 0.0
+
+    overall = float(getattr(reputation, "overall", 0))
+    safety = float(getattr(reputation, "safety", 0))
+    reliability = float(getattr(reputation, "reliability", 0))
+
+    return (overall + safety + reliability) / 3.0
 
 
 def attitude_multiplier(contract_attitude: str, field: str, reputation=None) -> float:
     multipliers = CONTRACT_ATTITUDE_MULTIPLIERS.get(
         contract_attitude,
-        CONTRACT_ATTITUDE_MULTIPLIERS["Practical"],
+        CONTRACT_ATTITUDE_MULTIPLIERS[DEFAULT_CONTRACT_ATTITUDE],
     )
-    multiplier = multipliers.get(field, 1.0)
+    multiplier = float(multipliers.get(field, 1.0))
 
-    # Noble heroes give better terms to reputable and safe managers,
-    # but are less impressed by unreliable managers.
-    if contract_attitude == "Noble" and reputation is not None:
-        goodwill = (reputation.overall + reputation.safety + reputation.reliability) / 3
+    if contract_attitude == "Noble":
+        goodwill = goodwill_score(reputation)
 
         if goodwill >= 25:
             multiplier *= 0.85

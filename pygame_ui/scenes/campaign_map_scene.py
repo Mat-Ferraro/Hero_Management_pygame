@@ -1,6 +1,6 @@
 import pygame
 
-from game_state import campaign_is_active, start_campaign_runtime
+from core.game_state import campaign_is_active, start_campaign_runtime
 from pygame_ui import theme
 from pygame_ui.scenes.scene_base import SceneBase
 from pygame_ui.ui_helpers import truncate_text
@@ -25,6 +25,30 @@ from systems.campaign.campaign_runtime import tick_campaign_runtime
 from systems.campaign.task_dispatch import find_task
 
 
+OPENABLE_TASK_STATES = {
+    TASK_STATE_PENDING,
+    TASK_STATE_TRAVELING_TO,
+    TASK_STATE_ACTIVE,
+    TASK_STATE_WAITING_FOR_DECISION,
+    TASK_STATE_AWAITING_ACK,
+}
+
+UNRESOLVED_TASK_STATES = {
+    TASK_STATE_PENDING,
+    TASK_STATE_TRAVELING_TO,
+    TASK_STATE_ACTIVE,
+    TASK_STATE_WAITING_FOR_DECISION,
+    TASK_STATE_AWAITING_ACK,
+}
+
+ACTIVE_FIELD_HERO_STATES = {
+    HERO_STATE_TRAVELING,
+    HERO_STATE_ON_TASK,
+    HERO_STATE_AWAITING_DECISION,
+    HERO_STATE_RETURNING,
+}
+
+
 class CampaignMapScene(SceneBase):
     def __init__(
         self,
@@ -44,7 +68,7 @@ class CampaignMapScene(SceneBase):
         if not campaign_is_active(self.state):
             start_campaign_runtime(self.state)
 
-        self.runtime = self.state.campaign_runtime
+        self.runtime = getattr(self.state, "campaign_runtime", None)
         self.status_message = status_message or "Campaign active."
         self.last_update_ticks = pygame.time.get_ticks()
         self.rng = None
@@ -56,6 +80,10 @@ class CampaignMapScene(SceneBase):
         self.footer_rect = pygame.Rect(30, 900, 1820, 130)
         self.summary_rect = pygame.Rect(420, 220, 1000, 500)
 
+    # -------------------------------------------------------------------------
+    # Pygame lifecycle
+    # -------------------------------------------------------------------------
+
     def handle_event(self, event):
         if self.handle_buttons_click(event, self.build_buttons()):
             return
@@ -64,11 +92,13 @@ class CampaignMapScene(SceneBase):
             return
 
         if event.type == pygame.MOUSEBUTTONDOWN and getattr(event, "button", None) == 1:
-            if self.handle_task_click(event.pos):
-                return
+            self.handle_task_click(event.pos)
 
     def update(self, mouse_pos):
         super().update(mouse_pos)
+
+        if self.runtime is None:
+            return
 
         if self.campaign_complete:
             return
@@ -77,7 +107,6 @@ class CampaignMapScene(SceneBase):
         delta_seconds = max(0.0, (now_ticks - self.last_update_ticks) / 1000.0)
         self.last_update_ticks = now_ticks
 
-        self.runtime.paused = False
         tick_campaign_runtime(self.runtime, self.state, delta_seconds, self.rng)
 
         if self.detect_campaign_started():
@@ -94,6 +123,11 @@ class CampaignMapScene(SceneBase):
 
     def draw(self, screen):
         self.clear_screen(screen)
+
+        if self.runtime is None:
+            screen.blit(self.title_font.render("Campaign runtime unavailable.", True, theme.TEXT_PRIMARY), (60, 60))
+            return
+
         self.draw_header(screen)
         self.draw_map_panel(screen)
         self.draw_footer_roster(screen)
@@ -102,6 +136,10 @@ class CampaignMapScene(SceneBase):
             self.draw_campaign_complete_overlay(screen)
 
         self.update_and_draw_buttons(screen, self.build_buttons())
+
+    # -------------------------------------------------------------------------
+    # Drawing
+    # -------------------------------------------------------------------------
 
     def draw_header(self, screen):
         HeaderPanel(
@@ -154,16 +192,7 @@ class CampaignMapScene(SceneBase):
                 continue
 
             pos = self.world_to_screen(task.map_position)
-
-            color = (210, 145, 90)
-            if task.state == TASK_STATE_TRAVELING_TO:
-                color = (95, 165, 225)
-            elif task.state == TASK_STATE_ACTIVE:
-                color = (200, 185, 95)
-            elif task.state == TASK_STATE_WAITING_FOR_DECISION:
-                color = (215, 105, 105)
-            elif task.state == TASK_STATE_AWAITING_ACK:
-                color = (110, 205, 120)
+            color = self.task_color(task.state)
 
             pygame.draw.circle(screen, color, pos, 18)
             pygame.draw.circle(screen, (245, 245, 250), pos, 18, 2)
@@ -177,30 +206,14 @@ class CampaignMapScene(SceneBase):
             self.draw_task_chip(screen, task, pos)
 
     def draw_task_chip(self, screen, task, pos):
-        if task.state == TASK_STATE_PENDING:
-            remaining = max(0.0, task.expire_time - self.runtime.elapsed_time)
-            text = f"{remaining:.0f}s"
-            style = "good"
-            if remaining <= 8:
-                style = "danger"
-            elif remaining <= 14:
-                style = "warning"
-        elif task.state == TASK_STATE_ACTIVE:
-            text = f"{self.task_completion_time_remaining(task):.0f}s"
-            style = "info"
-        elif task.state == TASK_STATE_WAITING_FOR_DECISION:
-            text = "Decision"
-            style = "danger"
-        elif task.state == TASK_STATE_AWAITING_ACK:
-            text = "Review"
-            style = "good"
-        else:
+        chip = self.task_chip_data(task)
+        if chip is None:
             return
 
         StatusChip(
             rect=(pos[0] - 22, pos[1] + 24, 82, 24),
-            text=text,
-            style=style,
+            text=chip["text"],
+            style=chip["style"],
         ).draw(screen, self.small_font)
 
     def draw_hero_icons(self, screen):
@@ -213,17 +226,7 @@ class CampaignMapScene(SceneBase):
             if position is None:
                 continue
 
-            color = (170, 220, 170)
-            if hero_state.state == HERO_STATE_TRAVELING:
-                color = (120, 200, 255)
-            elif hero_state.state == HERO_STATE_ON_TASK:
-                color = (230, 210, 120)
-            elif hero_state.state == HERO_STATE_AWAITING_DECISION:
-                color = (235, 145, 145)
-            elif hero_state.state == HERO_STATE_RETURNING:
-                color = (180, 180, 255)
-            elif hero_state.state == HERO_STATE_RESTING:
-                color = (140, 140, 150)
+            color = self.hero_state_color(hero_state.state)
 
             pygame.draw.circle(screen, color, position, 11)
             pygame.draw.circle(screen, (245, 245, 250), position, 11, 1)
@@ -246,15 +249,7 @@ class CampaignMapScene(SceneBase):
             hero_state = self.runtime.hero_states.get(hero.name)
             state_text = hero_state.state if hero_state else "unknown"
 
-            fill = (52, 52, 62)
-            if state_text == HERO_STATE_AVAILABLE:
-                fill = (48, 62, 52)
-            elif state_text == HERO_STATE_RESTING:
-                fill = (58, 58, 64)
-            elif state_text == HERO_STATE_RETURNING:
-                fill = (72, 58, 42)
-            elif state_text in (HERO_STATE_TRAVELING, HERO_STATE_ON_TASK, HERO_STATE_AWAITING_DECISION):
-                fill = (42, 58, 72)
+            fill = self.hero_card_fill_color(state_text)
 
             pygame.draw.rect(screen, fill, rect, border_radius=10)
             pygame.draw.rect(screen, (92, 96, 112), rect, 1, border_radius=10)
@@ -308,13 +303,17 @@ class CampaignMapScene(SceneBase):
 
         y = self.summary_rect.y + 90
         for line in lines:
-            if line == "":
+            if not line:
                 y += 22
                 continue
 
             text = self.font.render(line, True, theme.TEXT_SECONDARY)
             screen.blit(text, (self.summary_rect.x + 28, y))
             y += 34
+
+    # -------------------------------------------------------------------------
+    # Buttons / interactions
+    # -------------------------------------------------------------------------
 
     def build_buttons(self):
         if self.campaign_complete:
@@ -339,6 +338,9 @@ class CampaignMapScene(SceneBase):
             if task.is_terminal():
                 continue
 
+            if task.state not in OPENABLE_TASK_STATES:
+                continue
+
             icon_center = self.world_to_screen(task.map_position)
             icon_rect = pygame.Rect(icon_center[0] - 24, icon_center[1] - 24, 48, 48)
             label_rect = pygame.Rect(icon_center[0] + 18, icon_center[1] - 18, 150, 30)
@@ -349,6 +351,10 @@ class CampaignMapScene(SceneBase):
                 return True
 
         return False
+
+    # -------------------------------------------------------------------------
+    # Campaign progression
+    # -------------------------------------------------------------------------
 
     def detect_campaign_started(self):
         if self.live_task_count() > 0:
@@ -376,16 +382,7 @@ class CampaignMapScene(SceneBase):
         return True
 
     def has_unresolved_tasks(self):
-        for task in self.runtime.active_tasks:
-            if task.state in (
-                TASK_STATE_PENDING,
-                TASK_STATE_TRAVELING_TO,
-                TASK_STATE_ACTIVE,
-                TASK_STATE_WAITING_FOR_DECISION,
-                TASK_STATE_AWAITING_ACK,
-            ):
-                return True
-        return False
+        return any(task.state in UNRESOLVED_TASK_STATES for task in self.runtime.active_tasks)
 
     def has_active_field_heroes(self):
         for hero in self.state.roster:
@@ -393,12 +390,7 @@ class CampaignMapScene(SceneBase):
             if hero_state is None:
                 continue
 
-            if hero_state.state in (
-                HERO_STATE_TRAVELING,
-                HERO_STATE_ON_TASK,
-                HERO_STATE_AWAITING_DECISION,
-                HERO_STATE_RETURNING,
-            ):
+            if hero_state.state in ACTIVE_FIELD_HERO_STATES:
                 return True
 
         return False
@@ -413,6 +405,10 @@ class CampaignMapScene(SceneBase):
             if hero_state and hero_state.state == HERO_STATE_AVAILABLE:
                 count += 1
         return count
+
+    # -------------------------------------------------------------------------
+    # Geometry / positioning
+    # -------------------------------------------------------------------------
 
     def footer_card_rects(self):
         cards = []
@@ -454,7 +450,8 @@ class CampaignMapScene(SceneBase):
         if hero_state.state in (HERO_STATE_AVAILABLE, HERO_STATE_RESTING):
             return self.world_to_screen(CAMPAIGN_HOME_BASE_POSITION)
 
-        task = find_task(self.runtime, hero_state.assigned_task_id) if hero_state.assigned_task_id else None
+        task_id = getattr(hero_state, "current_task_id", None) or getattr(hero_state, "assigned_task_id", None)
+        task = find_task(self.runtime, task_id) if task_id else None
         if task is None:
             return self.world_to_screen(CAMPAIGN_HOME_BASE_POSITION)
 
@@ -465,7 +462,7 @@ class CampaignMapScene(SceneBase):
             if hero_state.travel_end_time is None:
                 return self.world_to_screen(home)
 
-            start_time = hero_state.travel_end_time - task.travel_time
+            start_time = hero_state.travel_end_time - float(task.travel_time)
             progress = self.progress_between(start_time, hero_state.travel_end_time, self.runtime.elapsed_time)
             return self.world_to_screen(self.lerp_position(home, target, progress))
 
@@ -476,7 +473,7 @@ class CampaignMapScene(SceneBase):
             if hero_state.return_end_time is None:
                 return self.world_to_screen(target)
 
-            start_time = hero_state.return_end_time - task.travel_time
+            start_time = hero_state.return_end_time - float(task.travel_time)
             progress = self.progress_between(start_time, hero_state.return_end_time, self.runtime.elapsed_time)
             return self.world_to_screen(self.lerp_position(target, home, progress))
 
@@ -493,6 +490,69 @@ class CampaignMapScene(SceneBase):
             int(sx + ((ex - sx) * t)),
             int(sy + ((ey - sy) * t)),
         )
+
+    # -------------------------------------------------------------------------
+    # Display helpers
+    # -------------------------------------------------------------------------
+
+    def task_color(self, task_state):
+        if task_state == TASK_STATE_TRAVELING_TO:
+            return (95, 165, 225)
+        if task_state == TASK_STATE_ACTIVE:
+            return (200, 185, 95)
+        if task_state == TASK_STATE_WAITING_FOR_DECISION:
+            return (215, 105, 105)
+        if task_state == TASK_STATE_AWAITING_ACK:
+            return (110, 205, 120)
+        return (210, 145, 90)
+
+    def task_chip_data(self, task):
+        if task.state == TASK_STATE_PENDING:
+            remaining = max(0.0, task.expire_time - self.runtime.elapsed_time)
+            style = "good"
+            if remaining <= 8:
+                style = "danger"
+            elif remaining <= 14:
+                style = "warning"
+            return {"text": f"{remaining:.0f}s", "style": style}
+
+        if task.state == TASK_STATE_ACTIVE:
+            return {
+                "text": f"{self.task_completion_time_remaining(task):.0f}s",
+                "style": "info",
+            }
+
+        if task.state == TASK_STATE_WAITING_FOR_DECISION:
+            return {"text": "Decision", "style": "danger"}
+
+        if task.state == TASK_STATE_AWAITING_ACK:
+            return {"text": "Review", "style": "good"}
+
+        return None
+
+    def hero_state_color(self, state_text):
+        if state_text == HERO_STATE_TRAVELING:
+            return (120, 200, 255)
+        if state_text == HERO_STATE_ON_TASK:
+            return (230, 210, 120)
+        if state_text == HERO_STATE_AWAITING_DECISION:
+            return (235, 145, 145)
+        if state_text == HERO_STATE_RETURNING:
+            return (180, 180, 255)
+        if state_text == HERO_STATE_RESTING:
+            return (140, 140, 150)
+        return (170, 220, 170)
+
+    def hero_card_fill_color(self, state_text):
+        if state_text == HERO_STATE_AVAILABLE:
+            return (48, 62, 52)
+        if state_text == HERO_STATE_RESTING:
+            return (58, 58, 64)
+        if state_text == HERO_STATE_RETURNING:
+            return (72, 58, 42)
+        if state_text in (HERO_STATE_TRAVELING, HERO_STATE_ON_TASK, HERO_STATE_AWAITING_DECISION):
+            return (42, 58, 72)
+        return (52, 52, 62)
 
     def hero_state_chip_style(self, state_text):
         if state_text == HERO_STATE_AVAILABLE:
@@ -519,7 +579,8 @@ class CampaignMapScene(SceneBase):
             return "Traveling to task"
 
         if hero_state.state == HERO_STATE_ON_TASK:
-            task = find_task(self.runtime, hero_state.assigned_task_id) if hero_state.assigned_task_id else None
+            task_id = getattr(hero_state, "current_task_id", None) or getattr(hero_state, "assigned_task_id", None)
+            task = find_task(self.runtime, task_id) if task_id else None
             if task is not None:
                 return f"On {truncate_text(task.task_type, self.small_font, 120)}"
             return "Working"
@@ -547,6 +608,6 @@ class CampaignMapScene(SceneBase):
             return 0.0
 
         if task.active_until is None:
-            return task.task_duration if task.state == TASK_STATE_WAITING_FOR_DECISION else 0.0
+            return float(task.task_duration) if task.state == TASK_STATE_WAITING_FOR_DECISION else 0.0
 
         return max(0.0, task.active_until - self.runtime.elapsed_time)

@@ -1,7 +1,7 @@
 import pygame
 
-from game_state import refresh_contract_market
-from systems.hero_progression import ensure_progression_fields
+from core.game_state import refresh_contract_market
+from systems.progression.hero_progression import ensure_progression_fields
 
 
 class DevConsole:

@@ -8,7 +8,7 @@ from pygame_ui.widgets.row_styles import draw_selectable_row
 from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 from pygame_ui.widgets.status_chip import StatusChip
 from pygame_ui.widgets.text_block import TextBlock
-from systems.rival_guilds import ensure_rival_guild_state, guild_power, recent_market_history
+from systems.guild.rival_guilds import ensure_rival_guild_state, guild_power, recent_market_history
 
 from ..widgets.button import Button
 
