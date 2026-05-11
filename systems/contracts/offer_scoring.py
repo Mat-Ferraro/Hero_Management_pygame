@@ -1,8 +1,35 @@
+"""
+systems/contracts/offer_scoring.py
+
+Scores contract offers from the hero's perspective and estimates rival
+guild interest.
+
+Reputation integration (v11 design):
+  The old system read five separate reputation axes (overall, reliability,
+  safety, development, class-specific) and applied them as components in
+  the offer score.  This made reputation feel like a hidden second economy
+  that the player had to track and optimise in parallel.
+
+  The new design reduces reputation to a single post-campaign standing
+  value [-2, +2] with one mechanical effect: a slight shift on the
+  acceptance threshold.  Rather than being baked into the score components,
+  standing is applied as a small additive shift at the end of the
+  acceptance check, scaled by the hero's attitude sensitivity.
+
+  Effect at the edges:
+    standing +2, Honorable hero  → threshold shifts down by ~4pp  (easier to accept)
+    standing -2, Honorable hero  → threshold shifts up   by ~4pp  (harder to accept)
+    standing ±2, Opportunistic   → threshold shifts by   ~2pp     (barely cares)
+
+  This keeps the effect real but never dominant.
+"""
+
 from __future__ import annotations
 
 import random
 from typing import Dict, List, Optional, Tuple
 
+from core.contract_attitudes import reputation_sensitivity
 from systems.guild.rival_guilds import (
     ensure_rival_guild_state,
     rival_guilds,
@@ -22,60 +49,71 @@ from .market_state import (
 GRADE_ORDER = ["A", "B", "C", "D", "F"]
 
 
-def class_reputation_score(state, hero) -> int:
-    class_key_map = {
-        "Warrior": "warrior",
-        "Rogue": "rogue",
-        "Cleric": "cleric",
-        "Mage": "mage",
-    }
-    key = class_key_map.get(getattr(hero, "hero_class", ""), "")
-    if not key:
-        return 0
-    return int(getattr(state.reputation, key, 0))
+# ---------------------------------------------------------------------------
+# Standing helper
+# ---------------------------------------------------------------------------
 
+def standing_acceptance_shift(state, hero) -> float:
+    """
+    Returns a small additive shift (in score points) applied to the
+    acceptance threshold based on the guild's recent standing and the
+    hero's attitude sensitivity.
+
+    Positive return value = threshold is lower (easier to accept).
+    Negative return value = threshold is higher (harder to accept).
+    """
+    reputation = getattr(state, "reputation", None)
+    if reputation is None:
+        return 0.0
+
+    standing = int(getattr(reputation, "standing", 0))
+    if standing == 0:
+        return 0.0
+
+    attitude = getattr(hero, "contract_attitude", "Pragmatic")
+    sensitivity = reputation_sensitivity(attitude)
+
+    # Base shift: ±2pp per standing point, scaled by sensitivity.
+    return standing * 2.0 * sensitivity
+
+
+# ---------------------------------------------------------------------------
+# Phase helpers
+# ---------------------------------------------------------------------------
 
 def phase_signing_multiplier(hero) -> float:
     phase = career_phase_name(hero)
-
-    if phase == "Rookie":
-        return 0.82
-    if phase == "Rising":
-        return 0.95
-    if phase == "Prime":
-        return 1.15
-    if phase == "Veteran":
-        return 0.96
-    if phase == "Elder":
-        return 0.82
-
-    return 1.0
+    return {
+        "Rookie":   0.82,
+        "Rising":   0.95,
+        "Prime":    1.15,
+        "Veteran":  0.96,
+        "Elder":    0.82,
+    }.get(phase, 1.0)
 
 
 def phase_term_preference(hero) -> int:
     phase = career_phase_name(hero)
+    return {
+        "Rookie":  4,
+        "Rising":  3,
+        "Prime":   3,
+        "Veteran": 2,
+        "Elder":   1,
+    }.get(phase, 3)
 
-    if phase == "Rookie":
-        return 4
-    if phase == "Rising":
-        return 3
-    if phase == "Prime":
-        return 3
-    if phase == "Veteran":
-        return 2
-    if phase == "Elder":
-        return 1
 
-    return 3
-
+# ---------------------------------------------------------------------------
+# Tier / loyalty helpers
+# ---------------------------------------------------------------------------
 
 def tier_score_bonus(hero) -> float:
     tier = getattr(hero, "market_tier", "Standard")
     return {
         "Developmental": -8.0,
-        "Standard": 0.0,
-        "Premium": 8.0,
-        "Elite": 14.0,
+        "Standard":       0.0,
+        "Premium":        8.0,
+        "Elite":         14.0,
     }.get(tier, 0.0)
 
 
@@ -92,9 +130,13 @@ def renewal_loyalty_modifier(hero) -> float:
     return 1.0
 
 
+# ---------------------------------------------------------------------------
+# Renewal term preference
+# ---------------------------------------------------------------------------
+
 def renewal_term_preference(hero) -> int:
     preferred = max(1, int(getattr(hero, "preferred_campaigns", 3)))
-    attitude = getattr(hero, "contract_attitude", "Practical")
+    attitude = getattr(hero, "contract_attitude", "Pragmatic")
     phase = career_phase_name(hero)
     phase_preference = phase_term_preference(hero)
 
@@ -107,11 +149,11 @@ def renewal_term_preference(hero) -> int:
     elif phase == "Rookie":
         preferred = max(preferred, 3)
 
-    if attitude == "Mercenary":
+    if attitude == "Opportunistic":
         preferred = max(1, preferred - 1)
-    elif attitude in ("Practical", "Modest"):
+    elif attitude in ("Pragmatic", "Humble"):
         preferred = max(preferred, 2 if phase != "Elder" else 1)
-    elif attitude in ("Ambitious", "Noble"):
+    elif attitude in ("Ambitious", "Honorable"):
         if phase in ("Rookie", "Rising", "Prime"):
             preferred = max(preferred, 3)
         else:
@@ -120,38 +162,28 @@ def renewal_term_preference(hero) -> int:
     return max(1, preferred)
 
 
+# ---------------------------------------------------------------------------
+# Renewal ask
+# ---------------------------------------------------------------------------
+
 def renewal_ask_for_hero(state, hero) -> Tuple[int, int]:
     ensure_hero_profile(hero)
 
     campaigns = renewal_term_preference(hero)
     signing_fee = max(25, int(hero.asking_signing_fee))
-
-    overall_rep = int(getattr(state.reputation, "overall", 0))
-    class_rep = int(class_reputation_score(state, hero))
     phase = career_phase_name(hero)
 
     signing_fee = int(signing_fee * renewal_loyalty_modifier(hero))
 
-    if overall_rep >= 35:
-        signing_fee = int(signing_fee * 0.95)
-    elif overall_rep <= -35:
-        signing_fee = int(signing_fee * 1.08)
-
-    if class_rep >= 35:
-        signing_fee = int(signing_fee * 0.95)
-    elif class_rep <= -35:
-        signing_fee = int(signing_fee * 1.08)
-
-    if phase == "Rookie":
-        signing_fee = int(signing_fee * 0.92)
-    elif phase == "Rising":
-        signing_fee = int(signing_fee * 0.98)
-    elif phase == "Prime":
-        signing_fee = int(signing_fee * 1.05)
-    elif phase == "Veteran":
-        signing_fee = int(signing_fee * 0.94)
-    elif phase == "Elder":
-        signing_fee = int(signing_fee * 0.82)
+    # Phase-based adjustments (career arc, not reputation).
+    phase_multipliers = {
+        "Rookie":   0.92,
+        "Rising":   0.98,
+        "Prime":    1.05,
+        "Veteran":  0.94,
+        "Elder":    0.82,
+    }
+    signing_fee = int(signing_fee * phase_multipliers.get(phase, 1.0))
 
     return max(1, campaigns), max(25, signing_fee)
 
@@ -164,6 +196,10 @@ def default_renewal_offer_for_hero(state, hero) -> Dict:
         "offered_signing_fee": int(signing_fee),
     }
 
+
+# ---------------------------------------------------------------------------
+# Grading
+# ---------------------------------------------------------------------------
 
 def grade_for_score(score: float) -> str:
     if score >= 85:
@@ -192,6 +228,10 @@ def grade_range_for_score(score: float, spread: float = 6.0) -> str:
     return f"{low}-{high}"
 
 
+# ---------------------------------------------------------------------------
+# Mentorship
+# ---------------------------------------------------------------------------
+
 def mentorship_bonus(state, hero) -> float:
     mentors = []
 
@@ -212,6 +252,10 @@ def mentorship_bonus(state, hero) -> float:
     return min(10.0, max(mentors) * 2.0)
 
 
+# ---------------------------------------------------------------------------
+# Core offer scoring  (reputation removed from components)
+# ---------------------------------------------------------------------------
+
 def offer_score_components(state, hero, campaigns: int, signing_fee: int) -> Dict[str, float]:
     ensure_hero_profile(hero)
 
@@ -228,51 +272,25 @@ def offer_score_components(state, hero, campaigns: int, signing_fee: int) -> Dic
     campaign_gap = abs(campaigns - ideal_campaigns)
     term_component = max(-10.0, 8.0 - (campaign_gap * 4.5)) * float(hero.term_weight)
 
-    overall_rep = int(getattr(state.reputation, "overall", 0))
-    reliability = int(getattr(state.reputation, "reliability", 0))
-    safety = int(getattr(state.reputation, "safety", 0))
-    development = int(getattr(state.reputation, "development", 0))
-    class_rep = class_reputation_score(state, hero)
-
-    rep_average = (overall_rep + reliability + class_rep) / 3.0
-    reputation_component = max(-8.0, min(8.0, rep_average / 10.0)) * float(hero.reputation_weight)
-    safety_component = max(-6.0, min(6.0, safety / 12.0)) * float(hero.safety_weight)
-
-    development_source = development
-    phase = career_phase_name(hero)
-    if phase == "Rookie" or getattr(hero, "is_developmental", False):
-        development_source += 12
-    elif phase == "Rising":
-        development_source += 6
-    elif phase == "Elder":
-        development_source -= 4
-
-    development_component = max(-6.0, min(8.0, development_source / 10.0)) * float(hero.development_weight)
     mentorship_component = mentorship_bonus(state, hero) * float(hero.mentorship_weight)
 
-    phase_component = 0.0
-    if phase == "Rookie":
-        phase_component -= 3.0
-    elif phase == "Rising":
-        phase_component += 2.0
-    elif phase == "Prime":
-        phase_component += 6.0
-    elif phase == "Veteran":
-        phase_component += 1.0
-    elif phase == "Elder":
-        phase_component -= 2.0
+    phase = career_phase_name(hero)
+    phase_component = {
+        "Rookie":   -3.0,
+        "Rising":    2.0,
+        "Prime":     6.0,
+        "Veteran":   1.0,
+        "Elder":    -2.0,
+    }.get(phase, 0.0)
 
     tier_component = tier_score_bonus(hero)
 
     return {
         "money_per_campaign": money_component,
-        "term": term_component,
-        "reputation": reputation_component,
-        "safety": safety_component,
-        "development": development_component,
-        "mentorship": mentorship_component,
-        "phase": phase_component,
-        "tier": tier_component,
+        "term":               term_component,
+        "mentorship":         mentorship_component,
+        "phase":              phase_component,
+        "tier":               tier_component,
     }
 
 
@@ -281,6 +299,10 @@ def evaluate_offer_score(state, hero, campaigns: int, signing_fee: int) -> float
     score = 50.0 + sum(components.values())
     return max(0.0, min(100.0, score))
 
+
+# ---------------------------------------------------------------------------
+# Renewal scoring
+# ---------------------------------------------------------------------------
 
 def renewal_relationship_bonus(state, hero) -> float:
     bonus = 0.0
@@ -295,9 +317,6 @@ def renewal_relationship_bonus(state, hero) -> float:
     elif satisfaction <= 40:
         bonus -= 6.0
 
-    bonus += max(-4.0, min(4.0, int(getattr(state.reputation, "overall", 0)) / 20.0))
-    bonus += max(-4.0, min(4.0, class_reputation_score(state, hero) / 20.0))
-
     return bonus
 
 
@@ -308,8 +327,70 @@ def evaluate_renewal_offer_score(state, hero, campaigns: int, signing_fee: int) 
 
 def renewal_acceptance_threshold(state, hero) -> float:
     ask_campaigns, ask_fee = renewal_ask_for_hero(state, hero)
-    return max(40.0, evaluate_renewal_offer_score(state, hero, ask_campaigns, ask_fee) - 2.0)
+    base_threshold = max(40.0, evaluate_renewal_offer_score(state, hero, ask_campaigns, ask_fee) - 2.0)
+    # Apply the standing shift to the threshold (positive shift lowers the bar).
+    shift = standing_acceptance_shift(state, hero)
+    return max(35.0, base_threshold - shift)
 
+
+# ---------------------------------------------------------------------------
+# Acceptance threshold for new signings
+# ---------------------------------------------------------------------------
+
+def personal_acceptance_threshold(state, hero) -> float:
+    ensure_hero_profile(hero)
+
+    phase = career_phase_name(hero)
+    tier = getattr(hero, "market_tier", "Standard")
+
+    threshold = 54.0
+
+    threshold += {
+        "Rookie":   -4.0,
+        "Rising":    1.0,
+        "Prime":     8.0,
+        "Veteran":   4.0,
+        "Elder":     2.0,
+    }.get(phase, 0.0)
+
+    threshold += {
+        "Developmental": -6.0,
+        "Standard":       0.0,
+        "Premium":        5.0,
+        "Elite":         10.0,
+    }.get(tier, 0.0)
+
+    combat_power_fn = getattr(hero, "combat_power", None)
+    power = int(combat_power_fn()) if callable(combat_power_fn) else int(getattr(hero, "level", 1) * 10)
+
+    if power >= 120:
+        threshold += 8.0
+    elif power >= 100:
+        threshold += 5.0
+    elif power >= 85:
+        threshold += 3.0
+
+    attitude = getattr(hero, "contract_attitude", "Pragmatic")
+    threshold += {
+        "Opportunistic":  4.0,
+        "Ambitious":      3.0,
+        "Honorable":      2.0,
+        "Humble":        -3.0,
+    }.get(attitude, 0.0)
+
+    if getattr(hero, "is_developmental", False):
+        threshold -= 4.0
+
+    # Apply standing shift (positive shift lowers the bar).
+    shift = standing_acceptance_shift(state, hero)
+    threshold -= shift
+
+    return max(38.0, min(82.0, threshold))
+
+
+# ---------------------------------------------------------------------------
+# Grading helpers for UI
+# ---------------------------------------------------------------------------
 
 def estimate_player_offer_grade(state, hero, campaigns: int, signing_fee: int) -> str:
     return grade_for_score(evaluate_offer_score(state, hero, campaigns, signing_fee))
@@ -319,18 +400,9 @@ def estimate_player_renewal_grade(state, hero, campaigns: int, signing_fee: int)
     return grade_for_score(evaluate_renewal_offer_score(state, hero, campaigns, signing_fee))
 
 
-def renewal_risk_label(state, hero, campaigns: int, signing_fee: int) -> str:
-    score = evaluate_renewal_offer_score(state, hero, campaigns, signing_fee)
-    threshold = renewal_acceptance_threshold(state, hero)
-
-    if score >= threshold + 10:
-        return "Low"
-    if score >= threshold + 3:
-        return "Moderate"
-    if score >= threshold:
-        return "High"
-    return "Very High"
-
+# ---------------------------------------------------------------------------
+# Rival guild scoring
+# ---------------------------------------------------------------------------
 
 def rival_guild_for_hero(state, hero) -> Optional[Dict]:
     ensure_hero_profile(hero)
@@ -363,13 +435,7 @@ def rival_guild_for_hero(state, hero) -> Optional[Dict]:
         elif tier == "Premium":
             weight += max(0, int(guild.get("prestige", 0)) // 2) + 4
 
-        if phase == "Prime":
-            weight += 5
-        elif phase == "Veteran":
-            weight += 2
-        elif phase == "Elder":
-            weight -= 2
-
+        weight += {"Prime": 5, "Veteran": 2, "Elder": -2}.get(phase, 0)
         weights.append(max(1, weight))
 
     return rng.choices(guild_pool, weights=weights, k=1)[0]
@@ -389,7 +455,6 @@ def rival_summary_for_hero(state, hero) -> Dict[str, str]:
             "tagline": "",
             "reason": "No clear rival signal",
         }
-
     return {
         "name": guild["name"],
         "style": guild.get("style", "Unknown"),
@@ -416,17 +481,17 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
 
     tier_bonus = {
         "Developmental": -18,
-        "Standard": 0,
-        "Premium": 14,
-        "Elite": 24,
+        "Standard":        0,
+        "Premium":        14,
+        "Elite":          24,
     }.get(tier, 0)
 
     phase_bonus = {
-        "Rookie": -6,
-        "Rising": 4,
-        "Prime": 12,
-        "Veteran": 5,
-        "Elder": -2,
+        "Rookie":  -6,
+        "Rising":   4,
+        "Prime":   12,
+        "Veteran":  5,
+        "Elder":   -2,
     }.get(phase, 0)
 
     power_bonus = 0
@@ -448,7 +513,6 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
     rng = random.Random(seed)
 
     interest = 0.10
-
     if tier == "Elite":
         interest = 0.96
     elif tier == "Premium":
@@ -503,9 +567,10 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
     if getattr(hero, "is_developmental", False):
         base += int(guild.get("rookie_interest", 0)) * 0.45
 
-    if getattr(hero, "contract_attitude", "") == "Mercenary":
+    attitude = getattr(hero, "contract_attitude", "")
+    if attitude == "Opportunistic":
         base += 4
-    if getattr(hero, "contract_attitude", "") == "Noble":
+    if attitude == "Honorable":
         base += 2 + (int(guild.get("prestige", 0)) * 0.20)
 
     base += rng.randint(-5, 5)
@@ -513,56 +578,21 @@ def estimate_rival_offer_score(state, hero) -> Optional[float]:
     return max(25.0, min(98.0, base))
 
 
-def personal_acceptance_threshold(state, hero) -> float:
-    ensure_hero_profile(hero)
+# ---------------------------------------------------------------------------
+# Threshold helpers
+# ---------------------------------------------------------------------------
 
-    phase = career_phase_name(hero)
-    tier = getattr(hero, "market_tier", "Standard")
-    satisfaction_like = 50.0
+def renewal_risk_label(state, hero, campaigns: int, signing_fee: int) -> str:
+    score = evaluate_renewal_offer_score(state, hero, campaigns, signing_fee)
+    threshold = renewal_acceptance_threshold(state, hero)
 
-    threshold = 54.0
-
-    threshold += {
-        "Rookie": -4.0,
-        "Rising": 1.0,
-        "Prime": 8.0,
-        "Veteran": 4.0,
-        "Elder": 2.0,
-    }.get(phase, 0.0)
-
-    threshold += {
-        "Developmental": -6.0,
-        "Standard": 0.0,
-        "Premium": 5.0,
-        "Elite": 10.0,
-    }.get(tier, 0.0)
-
-    combat_power_fn = getattr(hero, "combat_power", None)
-    power = int(combat_power_fn()) if callable(combat_power_fn) else int(getattr(hero, "level", 1) * 10)
-
-    if power >= 120:
-        threshold += 8.0
-    elif power >= 100:
-        threshold += 5.0
-    elif power >= 85:
-        threshold += 3.0
-
-    attitude = getattr(hero, "contract_attitude", "Practical")
-    if attitude == "Mercenary":
-        threshold += 4.0
-    elif attitude == "Ambitious":
-        threshold += 3.0
-    elif attitude == "Noble":
-        threshold += 2.0
-    elif attitude == "Modest":
-        threshold -= 3.0
-
-    if getattr(hero, "is_developmental", False):
-        threshold -= 4.0
-
-    threshold += max(-3.0, min(3.0, (50.0 - satisfaction_like) / 20.0))
-
-    return max(38.0, min(82.0, threshold))
+    if score >= threshold + 10:
+        return "Low"
+    if score >= threshold + 3:
+        return "Moderate"
+    if score >= threshold:
+        return "High"
+    return "Very High"
 
 
 def estimate_rival_grade_hint(state, hero) -> str:
@@ -571,6 +601,10 @@ def estimate_rival_grade_hint(state, hero) -> str:
         return "N/A"
     return grade_range_for_score(rival_score)
 
+
+# ---------------------------------------------------------------------------
+# Visible modifier text for UI
+# ---------------------------------------------------------------------------
 
 def visible_offer_modifiers(state, hero, campaigns: int, signing_fee: int) -> List[str]:
     components = offer_score_components(state, hero, campaigns, signing_fee)
@@ -589,19 +623,6 @@ def visible_offer_modifiers(state, hero, campaigns: int, signing_fee: int) -> Li
     if components["mentorship"] >= 1:
         lines.append("+ Strong mentorship available")
 
-    if components["reputation"] >= 1.5:
-        lines.append("+ Guild reputation helps")
-    elif components["reputation"] <= -1.5:
-        lines.append("- Guild reputation hurts")
-
-    if components["safety"] >= 1:
-        lines.append("+ Guild feels safer")
-    elif components["safety"] <= -1:
-        lines.append("- Guild feels risky")
-
-    if components["development"] >= 1:
-        lines.append("+ Good development path")
-
     if components["phase"] >= 5:
         lines.append("+ Proven in prime years")
     elif components["phase"] <= -2:
@@ -609,6 +630,13 @@ def visible_offer_modifiers(state, hero, campaigns: int, signing_fee: int) -> Li
 
     if components["tier"] >= 8:
         lines.append("+ High market status")
+
+    # Standing modifier — only surface if it's actually doing something.
+    shift = standing_acceptance_shift(state, hero)
+    if shift >= 3.0:
+        lines.append("+ Guild standing helps")
+    elif shift <= -3.0:
+        lines.append("- Guild standing hurts")
 
     if not lines:
         lines.append("No major visible modifiers")
@@ -625,15 +653,7 @@ def visible_renewal_modifiers(state, hero, campaigns: int, signing_fee: int) -> 
     elif satisfaction <= 35:
         lines.append("- Frustration penalty")
 
-    if class_reputation_score(state, hero) >= 25:
-        lines.append("+ Familiar class reputation")
-    elif class_reputation_score(state, hero) <= -25:
-        lines.append("- Distrusts guild direction")
-
-    if getattr(state.reputation, "overall", 0) >= 25:
-        lines.append("+ Stable guild environment")
-
-    deduped = []
+    deduped: List[str] = []
     for line in lines:
         if line not in deduped:
             deduped.append(line)
@@ -641,12 +661,15 @@ def visible_renewal_modifiers(state, hero, campaigns: int, signing_fee: int) -> 
     return deduped[:4]
 
 
+# ---------------------------------------------------------------------------
+# Summary helpers
+# ---------------------------------------------------------------------------
+
 def round_offer_summary(state, hero) -> Tuple[int, int]:
     offer = get_offer_for_hero(state, hero)
     if offer is None:
         default_offer = default_offer_for_hero(hero)
         return default_offer["offered_campaigns"], default_offer["offered_signing_fee"]
-
     return int(offer["offered_campaigns"]), int(offer["offered_signing_fee"])
 
 
@@ -655,5 +678,15 @@ def renewal_offer_summary(state, hero) -> Tuple[int, int]:
     if offer is None:
         default_offer = default_renewal_offer_for_hero(state, hero)
         return default_offer["offered_campaigns"], default_offer["offered_signing_fee"]
-
     return int(offer["offered_campaigns"]), int(offer["offered_signing_fee"])
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat shim
+# offer_scoring used to export class_reputation_score for the old UI.
+# Keep a no-op stub so nothing hard-crashes during the transition period.
+# ---------------------------------------------------------------------------
+
+def class_reputation_score(state, hero) -> int:  # pragma: no cover
+    """DEPRECATED.  Always returns 0.  Remove callsites."""
+    return 0

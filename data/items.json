@@ -1,12 +1,13 @@
 [
   {
     "name": "Rusty Longsword",
-    "slot": "weapon",
+    "category": "Weapon",
     "rarity": "Common",
+    "lore": "Worn but reliable. Still bites.",
+    "value": 60,
     "stat_bonuses": {
       "might": 2
     },
-    "value": 60,
     "damage_type_bonus": {
       "Physical": 0.05
     },
@@ -14,6 +15,12 @@
       "Beasts": 0.05
     },
     "enemy_type_resistance": {},
+    "tags": [
+      "blade",
+      "heavy"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Warrior",
       "Rogue"
@@ -21,16 +28,67 @@
     "enemy_affinity": [
       "Beasts",
       "Bandits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": [
+      "Knight's Axe",
+      "Sharpened Longsword"
     ]
   },
   {
-    "name": "Knight's Axe",
-    "slot": "weapon",
+    "name": "Sharpened Longsword",
+    "category": "Weapon",
     "rarity": "Uncommon",
+    "lore": "A proper edge makes all the difference.",
+    "value": 130,
+    "stat_bonuses": {
+      "might": 3
+    },
+    "damage_type_bonus": {
+      "Physical": 0.1
+    },
+    "enemy_type_bonus": {
+      "Beasts": 0.08,
+      "Bandits": 0.05
+    },
+    "enemy_type_resistance": {},
+    "tags": [
+      "blade",
+      "heavy"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "shield",
+        "stat": "guard",
+        "bonus": 1,
+        "description": "+1 guard when paired with any shield."
+      }
+    ],
+    "class_restrictions": [
+      "Warrior",
+      "Rogue"
+    ],
+    "enemy_affinity": [
+      "Beasts",
+      "Bandits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Rusty Longsword",
+    "upgrade_paths": []
+  },
+  {
+    "name": "Knight's Axe",
+    "category": "Weapon",
+    "rarity": "Uncommon",
+    "lore": "Heavy and punishing. Warriors only.",
+    "value": 150,
     "stat_bonuses": {
       "might": 4
     },
-    "value": 150,
     "damage_type_bonus": {
       "Physical": 0.1
     },
@@ -38,22 +96,35 @@
       "Bandits": 0.1
     },
     "enemy_type_resistance": {},
+    "tags": [
+      "blade",
+      "heavy"
+    ],
+    "drawbacks": [
+      "−1 swift while equipped (cumbersome)."
+    ],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Warrior"
     ],
     "enemy_affinity": [
       "Bandits",
       "Beasts"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Rusty Longsword",
+    "upgrade_paths": []
   },
   {
     "name": "Balanced Dagger",
-    "slot": "weapon",
+    "category": "Weapon",
     "rarity": "Common",
-    "stat_bonuses": {
-      "agility": 3
-    },
+    "lore": "Fast and quiet. Prefers shadows.",
     "value": 100,
+    "stat_bonuses": {
+      "swift": 2
+    },
     "damage_type_bonus": {
       "Physical": 0.08
     },
@@ -61,21 +132,84 @@
       "Bandits": 0.08
     },
     "enemy_type_resistance": {},
+    "tags": [
+      "blade",
+      "light",
+      "finesse"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "shadow",
+        "stat": "swift",
+        "bonus": 1,
+        "description": "+1 swift when paired with shadow gear."
+      }
+    ],
     "class_restrictions": [
       "Rogue"
     ],
     "enemy_affinity": [
       "Bandits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": [
+      "Shadow Bow",
+      "Venomstrike Dagger"
     ]
   },
   {
-    "name": "Shadow Bow",
-    "slot": "weapon",
+    "name": "Venomstrike Dagger",
+    "category": "Weapon",
     "rarity": "Rare",
+    "lore": "The wound it leaves keeps working long after the fight.",
+    "value": 200,
     "stat_bonuses": {
-      "agility": 5
+      "swift": 3,
+      "wit": 1
     },
+    "damage_type_bonus": {
+      "Physical": 0.12
+    },
+    "enemy_type_bonus": {
+      "Bandits": 0.12,
+      "Beasts": 0.08
+    },
+    "enemy_type_resistance": {},
+    "tags": [
+      "blade",
+      "light",
+      "finesse",
+      "cursed"
+    ],
+    "drawbacks": [
+      "Cursed: the hero occasionally fixates on a mark. Minor morale risk on failed missions."
+    ],
+    "synergy_conditions": [],
+    "class_restrictions": [
+      "Rogue"
+    ],
+    "enemy_affinity": [
+      "Bandits",
+      "Beasts"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Balanced Dagger",
+    "upgrade_paths": []
+  },
+  {
+    "name": "Shadow Bow",
+    "category": "Weapon",
+    "rarity": "Rare",
+    "lore": "Arrows that find gaps in the dark.",
     "value": 220,
+    "stat_bonuses": {
+      "swift": 4,
+      "wit": 1
+    },
     "damage_type_bonus": {
       "Physical": 0.12
     },
@@ -83,22 +217,41 @@
       "Spirits": 0.08
     },
     "enemy_type_resistance": {},
+    "tags": [
+      "ranged",
+      "light",
+      "shadow"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "finesse",
+        "stat": "swift",
+        "bonus": 1,
+        "description": "+1 swift when paired with any finesse weapon."
+      }
+    ],
     "class_restrictions": [
       "Rogue"
     ],
     "enemy_affinity": [
       "Spirits",
       "Bandits"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Balanced Dagger",
+    "upgrade_paths": []
   },
   {
     "name": "Apprentice Wand",
-    "slot": "weapon",
+    "category": "Weapon",
     "rarity": "Common",
-    "stat_bonuses": {
-      "mind": 3
-    },
+    "lore": "Channels raw force with only modest precision.",
     "value": 110,
+    "stat_bonuses": {
+      "wit": 3
+    },
     "damage_type_bonus": {
       "Magic": 0.1
     },
@@ -106,22 +259,35 @@
       "Spirits": 0.08
     },
     "enemy_type_resistance": {},
+    "tags": [
+      "arcane",
+      "light"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Mage"
     ],
     "enemy_affinity": [
       "Spirits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": [
+      "Elder Staff"
     ]
   },
   {
     "name": "Elder Staff",
-    "slot": "weapon",
+    "category": "Weapon",
     "rarity": "Rare",
-    "stat_bonuses": {
-      "mind": 5,
-      "spirit": 2
-    },
+    "lore": "Old wood remembers every spell it has conducted.",
     "value": 300,
+    "stat_bonuses": {
+      "wit": 5,
+      "presence": 2
+    },
     "damage_type_bonus": {
       "Magic": 0.15
     },
@@ -131,6 +297,20 @@
     "enemy_type_resistance": {
       "Magic": 0.05
     },
+    "tags": [
+      "arcane",
+      "staff",
+      "blessed"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "arcane",
+        "stat": "wit",
+        "bonus": 2,
+        "description": "+2 wit when equipped alongside another arcane item."
+      }
+    ],
     "class_restrictions": [
       "Mage",
       "Cleric"
@@ -138,16 +318,291 @@
     "enemy_affinity": [
       "Dragons",
       "Spirits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Apprentice Wand",
+    "upgrade_paths": []
+  },
+  {
+    "name": "Silver Mace",
+    "category": "Weapon",
+    "rarity": "Rare",
+    "lore": "Consecrated metal that burns what it should not touch.",
+    "value": 260,
+    "stat_bonuses": {
+      "presence": 4,
+      "might": 1
+    },
+    "damage_type_bonus": {
+      "Holy": 0.18
+    },
+    "enemy_type_bonus": {
+      "Undead": 0.2,
+      "Demons": 0.15
+    },
+    "enemy_type_resistance": {},
+    "tags": [
+      "holy",
+      "heavy",
+      "blessed"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "blessed",
+        "stat": "presence",
+        "bonus": 1,
+        "description": "+1 presence when paired with any blessed item."
+      }
+    ],
+    "class_restrictions": [
+      "Cleric"
+    ],
+    "enemy_affinity": [
+      "Undead",
+      "Demons"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Iron Kite Shield",
+    "category": "Armor",
+    "rarity": "Common",
+    "lore": "Practical protection. Stops what the sword misses.",
+    "value": 90,
+    "stat_bonuses": {
+      "guard": 3
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {
+      "Physical": 0.08
+    },
+    "tags": [
+      "shield",
+      "heavy"
+    ],
+    "drawbacks": [
+      "−1 swift while equipped."
+    ],
+    "synergy_conditions": [],
+    "class_restrictions": [
+      "Warrior",
+      "Cleric"
+    ],
+    "enemy_affinity": [],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": [
+      "Fortress Shield"
     ]
   },
   {
-    "name": "Blessed Charm",
-    "slot": "trinket",
+    "name": "Fortress Shield",
+    "category": "Armor",
     "rarity": "Uncommon",
+    "lore": "More wall than shield. Moving quickly is not the goal.",
+    "value": 180,
     "stat_bonuses": {
-      "spirit": 3
+      "guard": 5,
+      "might": 1
     },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {
+      "Physical": 0.15,
+      "Beasts": 0.1
+    },
+    "tags": [
+      "shield",
+      "heavy"
+    ],
+    "drawbacks": [
+      "−2 swift while equipped. Cannot be used by Rogues or Mages."
+    ],
+    "synergy_conditions": [
+      {
+        "requires_tag": "blade",
+        "stat": "guard",
+        "bonus": 2,
+        "description": "+2 guard when paired with any blade weapon."
+      }
+    ],
+    "class_restrictions": [
+      "Warrior",
+      "Cleric"
+    ],
+    "enemy_affinity": [],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": "Iron Kite Shield",
+    "upgrade_paths": []
+  },
+  {
+    "name": "Leather Vest",
+    "category": "Armor",
+    "rarity": "Common",
+    "lore": "Light and flexible. Better than nothing.",
+    "value": 70,
+    "stat_bonuses": {
+      "guard": 1,
+      "swift": 1
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {
+      "Physical": 0.05,
+      "Bandits": 0.05
+    },
+    "tags": [
+      "light"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
+    "class_restrictions": [],
+    "enemy_affinity": [
+      "Bandits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Dragonhide Cloak",
+    "category": "Armor",
+    "rarity": "Epic",
+    "lore": "Scales from something that had no business being killed. They kept their properties.",
+    "value": 420,
+    "stat_bonuses": {
+      "presence": 2,
+      "swift": 1
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {
+      "Dragons": 0.25,
+      "Demons": 0.1
+    },
+    "tags": [
+      "light",
+      "scaled",
+      "trophy"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
+    "class_restrictions": [],
+    "enemy_affinity": [
+      "Dragons"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Quickstep Boots",
+    "category": "Utility",
+    "rarity": "Common",
+    "lore": "The first step is always the most important one.",
+    "value": 75,
+    "stat_bonuses": {
+      "swift": 2
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {
+      "Beasts": 0.05,
+      "Bandits": 0.05
+    },
+    "tags": [
+      "light",
+      "movement"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
+    "class_restrictions": [],
+    "enemy_affinity": [
+      "Beasts",
+      "Bandits"
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Wayfinder Compass",
+    "category": "Utility",
+    "rarity": "Uncommon",
+    "lore": "Points to danger as readily as it points north.",
+    "value": 140,
+    "stat_bonuses": {
+      "wit": 2
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {},
+    "tags": [
+      "scout",
+      "arcane"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "ranged",
+        "stat": "swift",
+        "bonus": 1,
+        "description": "+1 swift when equipped alongside any ranged weapon."
+      }
+    ],
+    "class_restrictions": [],
+    "enemy_affinity": [],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Field Surgeon's Kit",
+    "category": "Utility",
+    "rarity": "Uncommon",
+    "lore": "Needle, thread, and the nerve to use them mid-crisis.",
+    "value": 160,
+    "stat_bonuses": {
+      "guard": 1
+    },
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {},
+    "tags": [
+      "support",
+      "medical"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
+    "class_restrictions": [],
+    "enemy_affinity": [],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": [],
+    "story_flags": []
+  },
+  {
+    "name": "Blessed Charm",
+    "category": "Trinket",
+    "rarity": "Uncommon",
+    "lore": "The warmth doesn't leave it, even in the cold.",
     "value": 120,
+    "stat_bonuses": {
+      "presence": 3
+    },
     "damage_type_bonus": {
       "Holy": 0.1
     },
@@ -158,21 +613,39 @@
     "enemy_type_resistance": {
       "Undead": 0.1
     },
+    "tags": [
+      "holy",
+      "blessed"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "holy",
+        "stat": "presence",
+        "bonus": 1,
+        "description": "+1 presence when equipped alongside any holy item."
+      }
+    ],
     "class_restrictions": [],
     "enemy_affinity": [
       "Undead",
       "Demons"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
   },
   {
     "name": "War Banner",
-    "slot": "trinket",
+    "category": "Trinket",
     "rarity": "Uncommon",
+    "lore": "It's not the cloth. It's what standing beneath it means.",
+    "value": 140,
     "stat_bonuses": {
       "might": 1,
-      "spirit": 2
+      "presence": 2
     },
-    "value": 140,
     "damage_type_bonus": {
       "Physical": 0.05
     },
@@ -182,42 +655,33 @@
     "enemy_type_resistance": {
       "Bandits": 0.05
     },
+    "tags": [
+      "heavy",
+      "morale"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Warrior"
     ],
     "enemy_affinity": [
       "Beasts",
       "Bandits"
-    ]
-  },
-  {
-    "name": "Quickstep Boots",
-    "slot": "boots",
-    "rarity": "Common",
-    "stat_bonuses": {
-      "agility": 2
-    },
-    "value": 75,
-    "damage_type_bonus": {},
-    "enemy_type_bonus": {},
-    "enemy_type_resistance": {
-      "Beasts": 0.05,
-      "Bandits": 0.05
-    },
-    "class_restrictions": [],
-    "enemy_affinity": [
-      "Beasts",
-      "Bandits"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
   },
   {
     "name": "Scholar's Ring",
-    "slot": "trinket",
+    "category": "Trinket",
     "rarity": "Common",
-    "stat_bonuses": {
-      "mind": 2
-    },
+    "lore": "Old binding. The inscription is worn smooth.",
     "value": 90,
+    "stat_bonuses": {
+      "wit": 2
+    },
     "damage_type_bonus": {
       "Magic": 0.05
     },
@@ -225,6 +689,18 @@
     "enemy_type_resistance": {
       "Magic": 0.05
     },
+    "tags": [
+      "arcane"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [
+      {
+        "requires_tag": "arcane",
+        "stat": "wit",
+        "bonus": 1,
+        "description": "+1 wit when equipped alongside any arcane item."
+      }
+    ],
     "class_restrictions": [
       "Mage",
       "Cleric"
@@ -232,62 +708,22 @@
     "enemy_affinity": [
       "Spirits",
       "Dragons"
-    ]
-  },
-  {
-    "name": "Silver Mace",
-    "slot": "weapon",
-    "rarity": "Rare",
-    "stat_bonuses": {
-      "spirit": 4,
-      "might": 1
-    },
-    "value": 260,
-    "damage_type_bonus": {
-      "Holy": 0.18
-    },
-    "enemy_type_bonus": {
-      "Undead": 0.2,
-      "Demons": 0.15
-    },
-    "enemy_type_resistance": {},
-    "class_restrictions": [
-      "Cleric"
     ],
-    "enemy_affinity": [
-      "Undead",
-      "Demons"
-    ]
-  },
-  {
-    "name": "Dragonhide Cloak",
-    "slot": "cloak",
-    "rarity": "Epic",
-    "stat_bonuses": {
-      "spirit": 2,
-      "agility": 1
-    },
-    "value": 420,
-    "damage_type_bonus": {},
-    "enemy_type_bonus": {},
-    "enemy_type_resistance": {
-      "Dragons": 0.25,
-      "Demons": 0.1
-    },
-    "class_restrictions": [],
-    "enemy_affinity": [
-      "Dragons"
-    ]
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
   },
   {
     "name": "Spirit Lantern",
-    "slot": "trinket",
+    "category": "Trinket",
     "rarity": "Rare",
-    "stat_bonuses": {
-      "mind": 2,
-      "spirit": 2
-    },
+    "lore": "Burns without fuel. Lights things that prefer the dark.",
     "value": 280,
+    "stat_bonuses": {
+      "wit": 2,
+      "presence": 2
+    },
     "damage_type_bonus": {
       "Magic": 0.08,
       "Holy": 0.08
@@ -298,22 +734,33 @@
     "enemy_type_resistance": {
       "Spirits": 0.15
     },
+    "tags": [
+      "arcane",
+      "holy"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Mage",
       "Cleric"
     ],
     "enemy_affinity": [
       "Spirits"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
   },
   {
     "name": "Demonbone Ward",
-    "slot": "trinket",
+    "category": "Trinket",
     "rarity": "Epic",
-    "stat_bonuses": {
-      "spirit": 4
-    },
+    "lore": "Made from a thing that no longer needed it. Uncomfortable to hold.",
     "value": 500,
+    "stat_bonuses": {
+      "presence": 4
+    },
     "damage_type_bonus": {
       "Holy": 0.15
     },
@@ -323,11 +770,51 @@
     "enemy_type_resistance": {
       "Demons": 0.25
     },
+    "tags": [
+      "holy",
+      "cursed",
+      "trophy"
+    ],
+    "drawbacks": [
+      "Cursed: the bearer occasionally attracts demonic attention. Small risk on high-threat missions."
+    ],
+    "synergy_conditions": [],
     "class_restrictions": [
       "Cleric"
     ],
     "enemy_affinity": [
       "Demons"
-    ]
+    ],
+    "consumable": false,
+    "equip_capacity_cost": 2,
+    "upgrade_from": null,
+    "upgrade_paths": []
+  },
+  {
+    "name": "Emergency Tonic",
+    "category": "Utility",
+    "rarity": "Common",
+    "lore": "Foul taste, good results. Single use.",
+    "value": 80,
+    "stat_bonuses": {},
+    "damage_type_bonus": {},
+    "enemy_type_bonus": {},
+    "enemy_type_resistance": {},
+    "tags": [
+      "consumable",
+      "medical"
+    ],
+    "drawbacks": [],
+    "synergy_conditions": [],
+    "class_restrictions": [],
+    "enemy_affinity": [],
+    "consumable": true,
+    "equip_capacity_cost": 1,
+    "upgrade_from": null,
+    "upgrade_paths": []
   }
 ]
+
+
+
+

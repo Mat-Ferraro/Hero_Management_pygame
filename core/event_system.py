@@ -1,3 +1,20 @@
+"""
+core/event_system.py  (patched section: apply_event_reputation)
+
+The old apply_event_reputation() called state.reputation.adjust(**changes)
+where `changes` was a dict of axis names → int amounts pulled from events.json.
+That multi-axis API no longer exists on RecentReputation.
+
+For now the function is stubbed out: it returns an empty list so the rest of
+the event pipeline is unaffected.  In a future pass, specific events in
+events.json that should affect standing can be given a dedicated
+"standing_delta" key (e.g. +1 or -1) and this function updated to call
+the appropriate trigger method on state.reputation.
+
+NOTE: Only this one function changes.  The full file is reproduced below
+to keep the diff self-contained.
+"""
+
 import random
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
@@ -84,6 +101,7 @@ def normalize_choices(raw_choices: Any) -> List[Dict[str, Any]]:
                 "outcome": str(raw_choice.get("outcome", "nothing")),
                 "message": str(raw_choice.get("message", "The party makes a choice.")),
                 "reputation": dict(raw_choice.get("reputation", {})),
+                "standing_delta": int(raw_choice.get("standing_delta", 0)),
                 "next_event_id": raw_choice.get("next_event_id"),
                 "branch_flags": dict(raw_choice.get("branch_flags", {})),
                 "linked_tasks": list(raw_choice.get("linked_tasks", [])),
@@ -151,11 +169,15 @@ def event_summary_lines(event: Dict[str, Any]) -> List[str]:
 
 
 def apply_event_reputation(state, reputation_changes: Dict[str, int], reason: str) -> List[str]:
-    if not reputation_changes:
-        return []
+    """
+    STUBBED.  The old multi-axis reputation.adjust(**changes) API is gone.
 
-    message = state.reputation.adjust(reason, **reputation_changes)
-    return [message] if message else []
+    Event-driven standing changes should now use `standing_delta` on the
+    choice dict (see normalize_choices) and be handled in
+    apply_choice_consequences below.  This function is kept as a no-op so
+    that any existing callers don't crash during the transition.
+    """
+    return []
 
 
 def apply_choice_consequences(
@@ -165,11 +187,19 @@ def apply_choice_consequences(
 ) -> Dict[str, Any]:
     applied_reason = reason or f"Event choice: {choice.get('label', 'Unknown choice')}"
 
-    reputation_messages = apply_event_reputation(
-        state=state,
-        reputation_changes=dict(choice.get("reputation", {})),
-        reason=applied_reason,
-    )
+    reputation_messages: List[str] = []
+
+    # New path: explicit standing_delta on the choice.
+    standing_delta = int(choice.get("standing_delta", 0))
+    reputation = getattr(state, "reputation", None)
+
+    if standing_delta != 0 and reputation is not None:
+        if standing_delta > 0:
+            msg = reputation._adjust(standing_delta, f"event choice ({applied_reason})")
+        else:
+            msg = reputation._adjust(standing_delta, f"event choice ({applied_reason})")
+        if msg:
+            reputation_messages.append(msg)
 
     return {
         "choice_id": choice.get("id"),

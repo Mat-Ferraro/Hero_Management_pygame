@@ -1,3 +1,18 @@
+"""
+pygame_ui/app.py
+
+Top-level application: scene management and game lifecycle.
+
+handle_campaign_complete() changes:
+  - Derives heroes_who_died from state.fallen_heroes delta (heroes added
+    during the campaign that are contracted, not temporaries).
+  - Derives campaign_outcome from the runtime's completed vs expired task
+    ratio: if all spawned tasks were completed → "success";
+    if more than half expired/failed → "failure"; otherwise None.
+  - Passes both into CampaignCycleManager.advance_cycle() so reputation
+    triggers actually fire.
+"""
+
 import pygame
 
 from core.game_state import (
@@ -27,13 +42,17 @@ from pygame_ui.scenes.training_scene import TrainingScene
 class App:
     def __init__(self, screen):
         self.screen = screen
-        self.clock = pygame.time.Clock()
+        self.clock  = pygame.time.Clock()
         self.running = True
-        self.state = None
+        self.state   = None
         self.dev_console = DevConsole(self)
-        self.scene = None
+        self.scene   = None
 
         self.show_main_menu()
+
+    # ------------------------------------------------------------------
+    # Menu / game lifecycle
+    # ------------------------------------------------------------------
 
     def show_main_menu(self):
         self.scene = MainMenuScene(
@@ -51,25 +70,29 @@ class App:
         if not save_exists():
             print("No save file found.")
             return
-
         try:
             self.state = load_game()
             ensure_rival_guild_state(self.state)
         except Exception as exc:
             print(f"Failed to load game: {exc}")
             return
-
         self.show_game_hub()
 
     def save_current_game(self):
         if self.state is None:
             return
-
         try:
             path = save_game(self.state)
             print(f"Saved game to {path}")
         except Exception as exc:
             print(f"Save failed: {exc}")
+
+    def quit_game(self):
+        self.running = False
+
+    # ------------------------------------------------------------------
+    # Scene navigation
+    # ------------------------------------------------------------------
 
     def show_game_hub(self, status_message=""):
         self.scene = GameHubScene(
@@ -96,11 +119,9 @@ class App:
     def show_campaign(self, status_message=""):
         if self.state is None:
             return
-
         if not campaign_is_active(self.state):
             start_campaign_runtime(self.state)
             self.save_current_game()
-
         self.scene = CampaignMapScene(
             state=self.state,
             on_campaign_complete=self.handle_campaign_complete,
@@ -108,32 +129,6 @@ class App:
             on_save_game=self.save_current_game,
             status_message=status_message,
         )
-
-    def handle_campaign_complete(self):
-        if self.state is None:
-            return
-
-        runtime = getattr(self.state, "campaign_runtime", None)
-
-        participating_heroes = [
-            hero
-            for hero in self.state.roster
-            if getattr(hero, "participated_this_cycle", False)
-        ]
-
-        cycle_messages = CampaignCycleManager(self.state).advance_cycle(participating_heroes)
-
-        if runtime is not None:
-            stop_campaign_runtime(self.state)
-            clear_campaign_runtime(self.state)
-
-        self.save_current_game()
-
-        status_message = "Campaign cycle resolved."
-        if cycle_messages:
-            status_message = cycle_messages[-1]
-
-        self.show_game_hub(status_message=status_message)
 
     def show_mission_assignment(self, task_id):
         self.scene = MissionAssignmentScene(
@@ -153,11 +148,9 @@ class App:
     def show_market(self):
         if self.state is None:
             return
-
         if not self.state.guild_upgrades.market_unlocked:
             self.show_game_hub()
             return
-
         self.scene = MarketScene(
             state=self.state,
             on_return_to_hub=self.show_game_hub,
@@ -167,11 +160,9 @@ class App:
     def show_training(self):
         if self.state is None:
             return
-
         if self.state.guild_upgrades.training_hall_level <= 0:
             self.show_game_hub()
             return
-
         self.scene = TrainingScene(
             state=self.state,
             on_return_to_hub=self.show_game_hub,
@@ -192,8 +183,86 @@ class App:
             on_save_game=self.save_current_game,
         )
 
-    def quit_game(self):
-        self.running = False
+    # ------------------------------------------------------------------
+    # Campaign completion
+    # ------------------------------------------------------------------
+
+    def handle_campaign_complete(self):
+        if self.state is None:
+            return
+
+        runtime = getattr(self.state, "campaign_runtime", None)
+
+        # Heroes who participated this cycle (for satisfaction / contracts).
+        participating_heroes = [
+            hero for hero in self.state.roster
+            if getattr(hero, "participated_this_cycle", False)
+        ]
+
+        # Heroes who died during this campaign — contracted only, not
+        # temporary survivors.  fallen_heroes accumulates during campaign
+        # resolution; we take all of them as this session's casualties.
+        heroes_who_died = [
+            hero for hero in getattr(self.state, "fallen_heroes", [])
+            if not getattr(hero, "is_temporary_survivor", False)
+        ]
+
+        # Derive campaign outcome from task completion ratio.
+        # completed_task_ids and expired_task_ids are tracked by the runtime.
+        campaign_outcome = self._derive_campaign_outcome(runtime)
+
+        cycle_messages = CampaignCycleManager(self.state).advance_cycle(
+            participating_heroes,
+            heroes_who_died=heroes_who_died,
+            campaign_outcome=campaign_outcome,
+        )
+
+        if runtime is not None:
+            stop_campaign_runtime(self.state)
+            clear_campaign_runtime(self.state)
+
+        self.save_current_game()
+
+        status_message = "Campaign cycle resolved."
+        if cycle_messages:
+            status_message = cycle_messages[-1]
+
+        self.show_game_hub(status_message=status_message)
+
+    @staticmethod
+    def _derive_campaign_outcome(runtime) -> str | None:
+        """
+        Determine whether the campaign was a success or failure based on
+        completed vs expired task counts from the runtime.
+
+        Rules (conservative thresholds — adjust as balance requires):
+          - "success"  : all spawned tasks completed (none expired/failed).
+          - "failure"  : more tasks expired/failed than completed.
+          - None       : mixed result — no reputation signal either way.
+
+        Returns None if runtime is unavailable or no tasks were spawned.
+        """
+        if runtime is None:
+            return None
+
+        completed = len(list(getattr(runtime, "completed_task_ids", []) or []))
+        expired   = len(list(getattr(runtime, "expired_task_ids",   []) or []))
+        total     = int(getattr(runtime, "total_spawns", 0))
+
+        if total <= 0:
+            return None
+
+        if expired == 0 and completed > 0:
+            return "success"
+
+        if expired > completed:
+            return "failure"
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
 
     def run(self):
         while self.running:

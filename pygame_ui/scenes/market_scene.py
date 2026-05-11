@@ -1,3 +1,14 @@
+"""
+pygame_ui/scenes/market_scene.py
+
+Item shop where the guild buys equipment between campaigns.
+
+Updated for new Item schema (v2):
+  - clone_market_item uses category= instead of slot=, copies all new fields.
+  - Row drawers show item.category chip instead of item.slot.
+  - Details panel shows category, tags, drawbacks, and lore.
+"""
+
 import random
 
 from core.data_loader import load_items
@@ -42,25 +53,17 @@ class MarketScene(SceneBase):
         self.shop_panel = ScrollableListPanel(
             rect=(40, 150, 900, 600),
             title="Shop Inventory",
-            row_height=68,
-            row_gap=10,
-            visible_rows=None,
-            font=self.font,
-            title_font=self.title_font,
-            padding=18,
-            title_height=64,
+            row_height=68, row_gap=10, visible_rows=None,
+            font=self.font, title_font=self.title_font,
+            padding=18, title_height=64,
         )
 
         self.inventory_panel = ScrollableListPanel(
             rect=(980, 150, 900, 600),
             title="Guild Inventory",
-            row_height=64,
-            row_gap=10,
-            visible_rows=None,
-            font=self.font,
-            title_font=self.title_font,
-            padding=18,
-            title_height=64,
+            row_height=64, row_gap=10, visible_rows=None,
+            font=self.font, title_font=self.title_font,
+            padding=18, title_height=64,
         )
 
     def sync_lists(self):
@@ -69,16 +72,9 @@ class MarketScene(SceneBase):
 
     def handle_event(self, event):
         self.sync_lists()
-
-        if self.shop_panel.handle_event(event):
-            return
-
-        if self.inventory_panel.handle_event(event):
-            return
-
-        if self.handle_buttons_click(event, self.build_buttons()):
-            return
-
+        if self.shop_panel.handle_event(event): return
+        if self.inventory_panel.handle_event(event): return
+        if self.handle_buttons_click(event, self.build_buttons()): return
         if self.is_left_click(event):
             self.handle_row_click(event.pos)
 
@@ -91,121 +87,78 @@ class MarketScene(SceneBase):
     def draw(self, screen):
         self.sync_lists()
         self.clear_screen(screen)
-
         self.draw_header(screen)
-
-        self.shop_panel.draw(
-            screen=screen,
-            row_drawer=self.draw_shop_row,
-            selected_item=self.selected_shop_item,
-            empty_text="The shop is empty.",
-        )
-
-        self.inventory_panel.draw(
-            screen=screen,
-            row_drawer=self.draw_inventory_row,
-            selected_item=None,
-            empty_text="No owned items.",
-        )
-
+        self.shop_panel.draw(screen=screen, row_drawer=self.draw_shop_row,
+                             selected_item=self.selected_shop_item, empty_text="The shop is empty.")
+        self.inventory_panel.draw(screen=screen, row_drawer=self.draw_inventory_row,
+                                  selected_item=None, empty_text="No owned items.")
         self.draw_details(screen)
         self.update_and_draw_buttons(screen, self.build_buttons())
 
     def draw_header(self, screen):
         HeaderPanel(
-            rect=(40, 30, 1840, 96),
-            title="Market",
-            stats="",
+            rect=(40, 30, 1840, 96), title="Market", stats="",
             status_message=self.status_message,
-            stats_pos=(70, 70),
-            status_pos=(1080, 108),
+            stats_pos=(70, 70), status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
 
         ResourceHeader(
             resources=[
-                ("Gold", f"{self.state.gold}g"),
-                ("Shop", len(self.shop_items)),
+                ("Gold",      f"{self.state.gold}g"),
+                ("Shop",      len(self.shop_items)),
                 ("Inventory", len(self.state.inventory)),
-                ("Refresh", f"{self.REFRESH_COST}g"),
+                ("Refresh",   f"{self.REFRESH_COST}g"),
             ],
-            spacing=220,
-            item_max_width=180,
-            font_size=24,
-            label_color=theme.TEXT_MUTED,
-            value_color=theme.TEXT_PRIMARY,
-            label_bold=False,
-            value_bold=True,
+            spacing=220, item_max_width=180, font_size=24,
+            label_color=theme.TEXT_MUTED, value_color=theme.TEXT_PRIMARY,
+            label_bold=False, value_bold=True,
         ).draw(screen, self.font, 60, 72)
 
     def draw_shop_row(self, screen, item, row_rect, is_selected, is_hovered):
-        draw_selectable_row(
-            screen=screen,
-            rect=row_rect,
-            is_selected=is_selected,
-            is_hovered=is_hovered,
-            style="dark",
-        )
+        draw_selectable_row(screen=screen, rect=row_rect,
+                            is_selected=is_selected, is_hovered=is_hovered, style="dark")
 
-        price = self.item_price(item)
+        price      = self.item_price(item)
         can_afford = self.state.gold >= price
 
         screen.blit(
             self.font.render(
                 truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 140),
-                True,
-                theme.TEXT_PRIMARY,
+                True, theme.TEXT_PRIMARY,
             ),
             (row_rect.x + 14, row_rect.y + 9),
         )
 
-        StatusChip(
-            rect=(row_rect.right - 106, row_rect.y + 9, 90, 26),
-            text=f"{price}g",
-            style="good" if can_afford else "danger",
-        ).draw(screen, self.small_font)
+        StatusChip(rect=(row_rect.right - 106, row_rect.y + 9, 90, 26),
+                   text=f"{price}g",
+                   style="good" if can_afford else "danger").draw(screen, self.small_font)
 
-        StatusChip(
-            rect=(row_rect.x + 14, row_rect.y + 40, 92, 24),
-            text=item.slot,
-            style="info",
-        ).draw(screen, self.small_font)
+        cat_label = "CONSUMABLE" if item.consumable else item.category
+        cat_style = "danger" if item.consumable else "info"
+        StatusChip(rect=(row_rect.x + 14, row_rect.y + 40, 110, 24),
+                   text=cat_label, style=cat_style).draw(screen, self.small_font)
 
         TextBlock(
-            lines=[self.item_bonus_summary(item)],
-            color=theme.TEXT_MUTED,
-            row_spacing=18,
-            max_lines=1,
-        ).draw(
-            screen=screen,
-            font=self.small_font,
-            x=row_rect.x + 118,
-            y=row_rect.y + 43,
-            max_width=row_rect.width - 240,
-        )
+            lines=[self.item_bonus_summary(item)], color=theme.TEXT_MUTED,
+            row_spacing=18, max_lines=1,
+        ).draw(screen=screen, font=self.small_font,
+               x=row_rect.x + 136, y=row_rect.y + 43,
+               max_width=row_rect.width - 256)
 
     def draw_inventory_row(self, screen, item, row_rect, is_selected, is_hovered):
-        draw_selectable_row(
-            screen=screen,
-            rect=row_rect,
-            is_selected=False,
-            is_hovered=is_hovered,
-            style="green",
-        )
+        draw_selectable_row(screen=screen, rect=row_rect,
+                            is_selected=False, is_hovered=is_hovered, style="green")
 
         screen.blit(
             self.font.render(
                 truncate_text(f"{item.name} [{item.rarity}]", self.font, row_rect.width - 140),
-                True,
-                (210, 240, 210),
+                True, (210, 240, 210),
             ),
             (row_rect.x + 14, row_rect.y + 9),
         )
 
-        StatusChip(
-            rect=(row_rect.x + 14, row_rect.y + 40, 92, 24),
-            text=item.slot,
-            style="info",
-        ).draw(screen, self.small_font)
+        StatusChip(rect=(row_rect.x + 14, row_rect.y + 40, 92, 24),
+                   text=item.category, style="info").draw(screen, self.small_font)
 
         screen.blit(
             self.small_font.render(f"Value {item.value}g", True, (180, 210, 180)),
@@ -214,97 +167,76 @@ class MarketScene(SceneBase):
 
     def draw_details(self, screen):
         if self.selected_shop_item is None:
-            self.details_panel.draw(
-                screen=screen,
-                title_font=self.title_font,
-                font=self.font,
-                left_lines=[],
-                right_lines=[],
-            )
+            self.details_panel.draw(screen=screen, title_font=self.title_font,
+                                    font=self.font, left_lines=[], right_lines=[])
             return
 
-        item = self.selected_shop_item
-        price = self.item_price(item)
+        item       = self.selected_shop_item
+        price      = self.item_price(item)
         can_afford = self.state.gold >= price
 
         self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
         left_x = self.details_panel.rect.x + 28
         right_x = self.details_panel.rect.x + 620
-        top_y = self.details_panel.rect.y + 52
+        top_y   = self.details_panel.rect.y + 52
+
+        left_rows = [
+            ("Item",     item.name),
+            ("Category", item.category),
+            ("Rarity",   item.rarity),
+            ("Price",    f"{price}g"),
+            ("Status",   "Affordable" if can_afford else "Not enough gold"),
+        ]
+        if item.equip_capacity_cost > 1:
+            left_rows.append(("Slot cost", f"{item.equip_capacity_cost} slots"))
+        if item.lore:
+            left_rows.append(("Lore", item.lore))
+
+        right_rows = [
+            ("Bonuses", self.item_bonus_summary(item)),
+            ("Tags",    item.tag_list_display()),
+            ("Classes", ", ".join(item.class_restrictions) if item.class_restrictions else "Any"),
+        ]
+        if item.drawbacks:
+            right_rows.append(("Drawback", "; ".join(item.drawbacks)))
+        if item.consumable:
+            right_rows.append(("Type", "CONSUMABLE — single use"))
+        right_rows.append(("Note", "Buying moves this item into guild inventory."))
 
         KeyValueGrid(
-            rows=[
-                ("Item", item.name),
-                ("Slot", item.slot),
-                ("Rarity", item.rarity),
-                ("Price", f"{price}g"),
-                ("Status", "Affordable" if can_afford else "Not enough gold"),
-            ],
-            columns=1,
-            column_width=500,
-            row_gap=10,
-            label_color=theme.TEXT_MUTED,
-            value_color=theme.TEXT_PRIMARY,
-            label_bold=True,
-            value_bold=False,
-            font_size=22,
-            line_spacing=2,
-        ).draw(
-            screen=screen,
-            font=self.font,
-            x=left_x,
-            y=top_y,
-        )
+            rows=left_rows, columns=1, column_width=500, row_gap=10,
+            label_color=theme.TEXT_MUTED, value_color=theme.TEXT_PRIMARY,
+            label_bold=True, value_bold=False, font_size=22, line_spacing=2,
+        ).draw(screen=screen, font=self.font, x=left_x, y=top_y)
 
         KeyValueGrid(
-            rows=[
-                ("Bonuses", self.item_bonus_summary(item)),
-                ("Classes", ", ".join(item.class_restrictions) if item.class_restrictions else "Any"),
-                ("Purchase Result", "Buying moves this item into guild inventory."),
-                ("Stock Rules", "Market stock refreshes when you spend gold to reroll the shop."),
-            ],
-            columns=1,
-            column_width=1100,
-            row_gap=10,
-            label_color=theme.TEXT_MUTED,
-            value_color=theme.TEXT_PRIMARY,
-            label_bold=True,
-            value_bold=False,
-            font_size=22,
-            line_spacing=2,
-        ).draw(
-            screen=screen,
-            font=self.font,
-            x=right_x,
-            y=top_y,
-        )
+            rows=right_rows, columns=1, column_width=1100, row_gap=10,
+            label_color=theme.TEXT_MUTED, value_color=theme.TEXT_PRIMARY,
+            label_bold=True, value_bold=False, font_size=22, line_spacing=2,
+        ).draw(screen=screen, font=self.font, x=right_x, y=top_y)
 
     def build_buttons(self):
         buttons = [
             hub_button(self.on_return_to_hub),
             action_button("Refresh Shop", self.refresh_shop, rect=(1460, 956, 180, 44)),
         ]
-
         if self.selected_shop_item is not None:
-            buttons.append(
-                action_button("Buy Item", self.buy_selected_item, rect=(1660, 956, 180, 44))
-            )
-
+            buttons.append(action_button("Buy Item", self.buy_selected_item, rect=(1660, 956, 180, 44)))
         return buttons
 
     def handle_row_click(self, pos):
         item = self.shop_panel.item_at_pos(pos)
         if item is not None:
             self.selected_shop_item = item
-            self.status_message = f"Selected shop item: {item.name}"
+            self.status_message = f"Selected: {item.name} [{item.category}]"
 
     def buy_selected_item(self):
         if self.selected_shop_item is None:
             self.status_message = "Select an item first."
             return
 
-        item = self.selected_shop_item
+        item  = self.selected_shop_item
         price = self.item_price(item)
 
         if self.state.gold < price:
@@ -324,11 +256,11 @@ class MarketScene(SceneBase):
         if self.on_save_game:
             self.on_save_game()
 
-        self.status_message = f"Purchased item."
+        self.status_message = f"Purchased {item.name}."
 
     def refresh_shop(self):
         if self.state.gold < self.REFRESH_COST:
-            self.status_message = f"Not enough gold to refresh shop. Cost: {self.REFRESH_COST}g."
+            self.status_message = f"Not enough gold to refresh. Cost: {self.REFRESH_COST}g."
             return
 
         self.state.gold -= self.REFRESH_COST
@@ -345,47 +277,50 @@ class MarketScene(SceneBase):
         item_pool = load_items()
         if not item_pool:
             return []
-
         return [self.clone_market_item(random.choice(item_pool)) for _ in range(self.SHOP_SIZE)]
 
-    def clone_market_item(self, item):
+    def clone_market_item(self, item: Item) -> Item:
+        """Deep-copy an item from the data pool into a fresh Item instance."""
         return Item(
             name=item.name,
-            slot=item.slot,
-            stat_bonuses=dict(item.stat_bonuses),
-            value=int(item.value),
+            category=item.category,
             rarity=item.rarity,
+            lore=item.lore,
+            value=int(item.value),
+            stat_bonuses=dict(item.stat_bonuses),
             damage_type_bonus=dict(item.damage_type_bonus),
             enemy_type_bonus=dict(item.enemy_type_bonus),
             enemy_type_resistance=dict(item.enemy_type_resistance),
+            tags=list(item.tags),
+            drawbacks=list(item.drawbacks),
+            synergy_conditions=list(item.synergy_conditions),
             class_restrictions=list(item.class_restrictions),
             enemy_affinity=list(item.enemy_affinity),
+            consumable=bool(item.consumable),
+            equip_capacity_cost=int(item.equip_capacity_cost),
+            upgrade_from=item.upgrade_from,
+            upgrade_paths=list(item.upgrade_paths),
+            story_flags=list(item.story_flags),
         )
 
-    def item_price(self, item):
-        rarity_multiplier = {
-            "Common": 1.0,
-            "Uncommon": 1.25,
-            "Rare": 1.6,
-            "Epic": 2.1,
+    def item_price(self, item: Item) -> int:
+        multiplier = {
+            "Common":    1.0,
+            "Uncommon":  1.25,
+            "Rare":      1.6,
+            "Epic":      2.1,
             "Legendary": 3.0,
         }.get(item.rarity, 1.0)
+        return max(1, int(item.value * multiplier))
 
-        return max(1, int(item.value * rarity_multiplier))
-
-    def item_bonus_summary(self, item):
+    def item_bonus_summary(self, item: Item) -> str:
         parts = []
-
         for stat, value in item.stat_bonuses.items():
             parts.append(f"+{value} {stat}")
-
         for damage, value in item.damage_type_bonus.items():
             parts.append(f"+{int(value * 100)}% {damage} dmg")
-
         for enemy, value in item.enemy_type_bonus.items():
             parts.append(f"+{int(value * 100)}% vs {enemy}")
-
         for enemy, value in item.enemy_type_resistance.items():
-            parts.append(f"-{int(value * 100)}% dmg from {enemy}")
-
+            parts.append(f"-{int(value * 100)}% from {enemy}")
         return "; ".join(parts) if parts else "No bonuses"

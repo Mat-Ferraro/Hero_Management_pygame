@@ -1,9 +1,25 @@
+"""
+core/save_system.py
+
+Serialisation and deserialisation for all game state.
+
+Version history
+---------------
+10  — previous format (9-axis ManagerReputation: overall, reliability,
+       safety, development, protector, warrior, rogue, cleric, mage)
+11  — reputation collapsed to single-axis RecentReputation (standing int
+       + history list).  Old saves load gracefully: if the "standing" key
+       is absent but old multi-axis keys are present, standing is derived
+       by clamping the old "overall" score to [-2, +2] so the save is
+       still usable.
+"""
+
 import json
 from pathlib import Path
 from typing import Any, Dict
 
 from .game_state import BereavementPayment, GameState
-from .manager_reputation import ManagerReputation
+from .manager_reputation import RecentReputation
 from models import Hero, Item
 from systems.campaign.campaign_models import CampaignRuntime
 from systems.guild.guild_upgrades import guild_upgrades_from_dict, guild_upgrades_to_dict
@@ -12,38 +28,72 @@ from systems.guild.rival_guilds import ensure_rival_guild_state
 
 SAVE_DIR = Path("saves")
 DEFAULT_SAVE_PATH = SAVE_DIR / "save_slot_1.json"
-SAVE_VERSION = 10
+SAVE_VERSION = 11
 
+
+# ---------------------------------------------------------------------------
+# Item
+# ---------------------------------------------------------------------------
 
 def item_to_dict(item: Item) -> Dict[str, Any]:
     return {
         "name": item.name,
-        "slot": item.slot,
-        "stat_bonuses": dict(item.stat_bonuses),
-        "value": int(item.value),
+        "category": item.category,
         "rarity": item.rarity,
+        "lore": item.lore,
+        "value": int(item.value),
+        "stat_bonuses": dict(item.stat_bonuses),
         "damage_type_bonus": dict(item.damage_type_bonus),
         "enemy_type_bonus": dict(item.enemy_type_bonus),
         "enemy_type_resistance": dict(item.enemy_type_resistance),
+        "tags": list(item.tags),
+        "drawbacks": list(item.drawbacks),
+        "synergy_conditions": list(item.synergy_conditions),
         "class_restrictions": list(item.class_restrictions),
         "enemy_affinity": list(item.enemy_affinity),
+        "consumable": bool(item.consumable),
+        "equip_capacity_cost": int(item.equip_capacity_cost),
+        "upgrade_from": item.upgrade_from,
+        "upgrade_paths": list(item.upgrade_paths),
+        "story_flags": list(item.story_flags),
     }
 
 
 def item_from_dict(data: Dict[str, Any]) -> Item:
+    """
+    Reconstruct an Item from saved data.
+    Handles both new schema (category) and old schema (slot) for
+    backward-compatibility with pre-v11 save files.
+    """
+    from core.data_loader import _resolve_category
+    category = _resolve_category(data)
+
     return Item(
-        name=data["name"],
-        slot=data["slot"],
-        stat_bonuses=dict(data.get("stat_bonuses", {})),
-        value=int(data["value"]),
+        name=str(data["name"]),
+        category=category,
         rarity=data.get("rarity", "Common"),
+        lore=data.get("lore", ""),
+        value=int(data.get("value", 0)),
+        stat_bonuses=dict(data.get("stat_bonuses", {})),
         damage_type_bonus=dict(data.get("damage_type_bonus", {})),
         enemy_type_bonus=dict(data.get("enemy_type_bonus", {})),
         enemy_type_resistance=dict(data.get("enemy_type_resistance", {})),
+        tags=list(data.get("tags", [])),
+        drawbacks=list(data.get("drawbacks", [])),
+        synergy_conditions=list(data.get("synergy_conditions", [])),
         class_restrictions=list(data.get("class_restrictions", [])),
         enemy_affinity=list(data.get("enemy_affinity", [])),
+        consumable=bool(data.get("consumable", False)),
+        equip_capacity_cost=int(data.get("equip_capacity_cost", 1)),
+        upgrade_from=data.get("upgrade_from"),
+        upgrade_paths=list(data.get("upgrade_paths", [])),
+        story_flags=list(data.get("story_flags", [])),
     )
 
+
+# ---------------------------------------------------------------------------
+# Hero
+# ---------------------------------------------------------------------------
 
 def hero_to_dict(hero: Hero) -> Dict[str, Any]:
     from systems.progression.hero_progression import ensure_progression_fields, progression_to_dict
@@ -100,7 +150,7 @@ def hero_from_dict(data: Dict[str, Any]) -> Hero:
         contract_years=int(data["contract_years"]),
         specialty=data.get("specialty", "Adventurer"),
         growth_rate=data.get("growth_rate", "Talented"),
-        contract_attitude=data.get("contract_attitude", "Practical"),
+        contract_attitude=data.get("contract_attitude", "Pragmatic"),
         equipment={
             slot: item_from_dict(item_data)
             for slot, item_data in data.get("equipment", {}).items()
@@ -126,35 +176,43 @@ def hero_from_dict(data: Dict[str, Any]) -> Hero:
     return hero
 
 
-def reputation_to_dict(reputation: ManagerReputation) -> Dict[str, Any]:
+# ---------------------------------------------------------------------------
+# Reputation  (v11: single-axis RecentReputation)
+# ---------------------------------------------------------------------------
+
+def reputation_to_dict(reputation: RecentReputation) -> Dict[str, Any]:
     return {
-        "overall": int(reputation.overall),
-        "reliability": int(reputation.reliability),
-        "safety": int(reputation.safety),
-        "development": int(reputation.development),
-        "protector": int(reputation.protector),
-        "warrior": int(reputation.warrior),
-        "rogue": int(reputation.rogue),
-        "cleric": int(reputation.cleric),
-        "mage": int(reputation.mage),
+        "standing": int(reputation.standing),
         "history": list(reputation.history),
     }
 
 
-def reputation_from_dict(data: Dict[str, Any]) -> ManagerReputation:
-    return ManagerReputation(
-        overall=int(data.get("overall", 0)),
-        reliability=int(data.get("reliability", 0)),
-        safety=int(data.get("safety", 0)),
-        development=int(data.get("development", 0)),
-        protector=int(data.get("protector", 0)),
-        warrior=int(data.get("warrior", 0)),
-        rogue=int(data.get("rogue", 0)),
-        cleric=int(data.get("cleric", 0)),
-        mage=int(data.get("mage", 0)),
+def reputation_from_dict(data: Dict[str, Any]) -> RecentReputation:
+    """
+    Loads a RecentReputation from saved data.
+
+    Backward-compatible with v10 saves: if "standing" is absent but the
+    old "overall" key is present, we derive a standing value by clamping
+    the old score to [-2, +2] so that existing saves load cleanly.
+    """
+    if "standing" in data:
+        standing = int(data["standing"])
+    elif "overall" in data:
+        # Migrate from v10: scale old overall [-100, +100] → [-2, +2]
+        old_overall = int(data.get("overall", 0))
+        standing = max(-2, min(2, old_overall // 35))
+    else:
+        standing = 0
+
+    return RecentReputation(
+        standing=standing,
         history=list(data.get("history", [])),
     )
 
+
+# ---------------------------------------------------------------------------
+# BereavementPayment
+# ---------------------------------------------------------------------------
 
 def bereavement_to_dict(payment: BereavementPayment) -> Dict[str, Any]:
     return {
@@ -169,6 +227,10 @@ def bereavement_from_dict(data: Dict[str, Any]) -> BereavementPayment:
         amount=int(data["amount"]),
     )
 
+
+# ---------------------------------------------------------------------------
+# Rival guild
+# ---------------------------------------------------------------------------
 
 def rival_guild_to_dict(guild: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -202,6 +264,10 @@ def rival_guild_from_dict(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Contract offer
+# ---------------------------------------------------------------------------
+
 def contract_offer_to_dict(offer: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "hero_name": offer.get("hero_name", ""),
@@ -218,6 +284,10 @@ def contract_offer_from_dict(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Campaign runtime
+# ---------------------------------------------------------------------------
+
 def campaign_runtime_to_dict(runtime: CampaignRuntime | None) -> Dict[str, Any] | None:
     if runtime is None:
         return None
@@ -229,6 +299,10 @@ def campaign_runtime_from_dict(data: Dict[str, Any] | None) -> CampaignRuntime |
         return None
     return CampaignRuntime.from_dict(data)
 
+
+# ---------------------------------------------------------------------------
+# Full game state
+# ---------------------------------------------------------------------------
 
 def game_state_to_dict(state: GameState) -> Dict[str, Any]:
     ensure_rival_guild_state(state)
