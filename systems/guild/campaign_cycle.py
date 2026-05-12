@@ -4,23 +4,20 @@ systems/guild/campaign_cycle.py
 Manages the end-of-campaign cycle: time advancement, satisfaction, roster
 cleanup, retirement, and market refresh.
 
-Reputation triggers (added in this version):
-  - state.reputation.decay() — called once at the top of advance_cycle so
-    standing drifts back toward neutral each cycle.
-  - record_hero_death() — called when a contracted hero dies (not temporaries).
-  - record_hero_retirement() — called when a hero retires via should_retire().
-  - record_campaign_success() / record_mission_failures() — called based on
-    the campaign outcome summary passed into advance_cycle.
+Reputation triggers:
+  - state.reputation.decay() — runs once per cycle.
+  - record_hero_death() — per contracted hero death.
+  - record_hero_retirement() — per successful retirement.
+  - record_campaign_success() / record_mission_failures() — per cycle outcome.
 
-  The caller (campaign_runtime / the scene that ends a campaign) is responsible
-  for passing outcome data.  advance_cycle() accepts two new optional arguments:
-    - heroes_who_died: list of Hero objects that died this campaign.
-    - campaign_outcome: "success" | "failure" | None (unknown / not tracked).
-  Both default to safe values so existing call sites need no changes.
+Retirement legacy:
+  - compute_legacy() is called at the start of each cycle.
+  - apply_legacy_to_cycle() fires the legacy stipend bonus.
+  - Legacy injury recovery stacks with doctrine bonus in _advance_hero_injury().
+  - Legacy satisfaction bonus is applied per hero who participated.
 
 Equipment cleanup:
-  When a hero retires or abandons the guild, unequip_all() is called so
-  their gear returns to the guild inventory automatically.
+  - unequip_all() called when heroes retire or abandon.
 """
 
 from __future__ import annotations
@@ -33,10 +30,11 @@ from systems.contracts.contract_lifecycle import (
     decrement_contracts_for_party,
 )
 from systems.equipment.equipment_rules import unequip_all
+from systems.guild.retirement_legacy import apply_legacy_to_cycle, compute_legacy
 from systems.guild.rival_guilds import advance_rival_guilds, add_market_history_entry
 
 
-CAMPAIGN_YEARS_PASSED       = 2
+CAMPAIGN_YEARS_PASSED          = 2
 
 PARTICIPATED_SATISFACTION_GAIN = 6
 IDLE_SATISFACTION_LOSS         = 4
@@ -60,32 +58,31 @@ class CampaignCycleManager:
         Parameters
         ----------
         participating_heroes:
-            Heroes who went on this campaign (used for satisfaction and
-            contract decrements).
+            Heroes who went on this campaign.
         heroes_who_died:
-            Contracted heroes who died during the campaign.  Each triggers
-            a negative reputation event.  Defaults to empty list.
+            Contracted heroes who died; each triggers a negative reputation event.
         campaign_outcome:
-            "success"  — all missions completed.  Positive reputation event.
-            "failure"  — too many missions failed.  Negative reputation event.
-            None       — outcome unknown or not tracked; no reputation change.
+            "success" | "failure" | None
         """
         messages: List[str] = []
 
-        participating_heroes  = list(participating_heroes)
-        heroes_who_died       = list(heroes_who_died or [])
+        participating_heroes   = list(participating_heroes)
+        heroes_who_died        = list(heroes_who_died or [])
         participating_hero_ids = {id(h) for h in participating_heroes}
 
-        # Reputation decays at the start of each cycle — keeps standing recent.
+        # Compute legacy once — used throughout the cycle.
+        legacy = compute_legacy(self.state)
+
+        # Reputation decays at the start of each cycle.
         reputation = getattr(self.state, "reputation", None)
         if reputation is not None:
             reputation.decay()
 
         messages.extend(self._log_cycle_header())
-        messages.extend(self._apply_time_and_stipend())
+        messages.extend(self._apply_time_and_stipend(legacy))
         messages.extend(self._apply_death_reputation(heroes_who_died, reputation))
         messages.extend(self._apply_campaign_outcome_reputation(campaign_outcome, reputation))
-        messages.extend(self.advance_hero_time(participating_hero_ids))
+        messages.extend(self.advance_hero_time(participating_hero_ids, legacy))
         messages.extend(decrement_contracts_for_party(participating_heroes))
         messages.extend(self.cleanup_roster(reputation))
         messages.extend(collect_expired_heroes(self.state))
@@ -99,13 +96,11 @@ class CampaignCycleManager:
     # ------------------------------------------------------------------
 
     def _apply_death_reputation(self, heroes_who_died: List, reputation) -> List[str]:
-        """Fire a negative reputation event for each contracted hero death."""
         messages: List[str] = []
         if reputation is None:
             return messages
         for hero in heroes_who_died:
-            is_temp = bool(getattr(hero, "is_temporary_survivor", False))
-            if not is_temp:
+            if not bool(getattr(hero, "is_temporary_survivor", False)):
                 msg = reputation.record_hero_death(getattr(hero, "name", "Unknown hero"))
                 if msg:
                     messages.append(msg)
@@ -114,18 +109,15 @@ class CampaignCycleManager:
     def _apply_campaign_outcome_reputation(
         self, outcome: Optional[str], reputation
     ) -> List[str]:
-        """Apply reputation for overall campaign result."""
         messages: List[str] = []
         if reputation is None or outcome is None:
             return messages
         if outcome == "success":
             msg = reputation.record_campaign_success()
-            if msg:
-                messages.append(msg)
+            if msg: messages.append(msg)
         elif outcome == "failure":
             msg = reputation.record_mission_failures()
-            if msg:
-                messages.append(msg)
+            if msg: messages.append(msg)
         return messages
 
     # ------------------------------------------------------------------
@@ -139,41 +131,64 @@ class CampaignCycleManager:
         add_market_history_entry(self.state, time_message)
         return [header, time_message]
 
-    def _apply_time_and_stipend(self) -> List[str]:
+    def _apply_time_and_stipend(self, legacy) -> List[str]:
         self.state.year += CAMPAIGN_YEARS_PASSED
+
+        # Standard Crown stipend.
         stipend = int(self.state.guild_upgrades.crown_stipend)
         self.state.gold += stipend
-        msg = f"The Crown grants the guild a {stipend}g campaign stipend."
-        add_market_history_entry(self.state, msg)
-        return [msg]
+        messages = [f"The Crown grants the guild a {stipend}g campaign stipend."]
+        add_market_history_entry(self.state, messages[0])
 
-    def advance_hero_time(self, participating_hero_ids) -> List[str]:
+        # Legacy stipend bonus.
+        legacy_msgs = apply_legacy_to_cycle(self.state, legacy)
+        for msg in legacy_msgs:
+            messages.append(msg)
+            add_market_history_entry(self.state, msg)
+
+        return messages
+
+    def advance_hero_time(self, participating_hero_ids, legacy) -> List[str]:
         messages: List[str] = []
+
+        # Sync guild-level equip_capacity_bonus to every hero each cycle.
+        guild_eq_bonus = int(getattr(self.state.guild_upgrades, "equip_capacity_bonus", 0))
+
         for hero in list(self.state.roster):
             participated = id(hero) in participating_hero_ids
+
+            # Propagate equip capacity bonus.
+            hero.equip_capacity_bonus = guild_eq_bonus
 
             old_age   = int(hero.age)
             hero.age += CAMPAIGN_YEARS_PASSED
             messages.append(f"{hero.name} aged from {old_age} to {hero.age}.")
 
-            messages.extend(self._advance_hero_injury(hero))
-            messages.extend(self._apply_campaign_satisfaction(hero, participated))
+            messages.extend(self._advance_hero_injury(hero, legacy))
+            messages.extend(self._apply_campaign_satisfaction(hero, participated, legacy))
             messages.extend(self._apply_low_health_penalty(hero))
 
             if getattr(hero, "satisfaction", 50) <= 20:
                 messages.append(f"{hero.name} is considering leaving the guild.")
 
-            hero.current_health        = None
+            hero.current_health          = None
             hero.participated_this_cycle = False
 
         return [m for m in messages if m]
 
-    def _advance_hero_injury(self, hero) -> List[str]:
+    def _advance_hero_injury(self, hero, legacy) -> List[str]:
         messages: List[str] = []
         if getattr(hero, "injured_years_remaining", 0) <= 0:
             return messages
+
+        # Doctrine bonus + legacy bonus stack.
+        doctrine_bonus = int(getattr(self.state.guild_upgrades, "injury_recovery_bonus", 0))
+        legacy_bonus   = int(getattr(legacy, "total_injury_recovery", 0))
+        effective_recovery = CAMPAIGN_YEARS_PASSED + doctrine_bonus + legacy_bonus
+
         old = int(hero.injured_years_remaining)
-        hero.injured_years_remaining = max(0, old - CAMPAIGN_YEARS_PASSED)
+        hero.injured_years_remaining = max(0, old - effective_recovery)
+
         if hero.injured_years_remaining == 0:
             messages.append(f"{hero.name} recovered from injury.")
         else:
@@ -185,9 +200,11 @@ class CampaignCycleManager:
         )
         return messages
 
-    def _apply_campaign_satisfaction(self, hero, participated: bool) -> List[str]:
+    def _apply_campaign_satisfaction(self, hero, participated: bool, legacy) -> List[str]:
+        legacy_sat = int(getattr(legacy, "total_satisfaction_bonus", 0))
         if participated:
-            return [hero.adjust_satisfaction(PARTICIPATED_SATISFACTION_GAIN, "sent on campaign")]
+            total = PARTICIPATED_SATISFACTION_GAIN + legacy_sat
+            return [hero.adjust_satisfaction(total, "sent on campaign")]
         return [hero.adjust_satisfaction(-IDLE_SATISFACTION_LOSS, "left idle during campaign")]
 
     def _apply_low_health_penalty(self, hero) -> List[str]:
@@ -205,18 +222,12 @@ class CampaignCycleManager:
     def cleanup_roster(self, reputation=None) -> List[str]:
         """
         Remove heroes who quit (satisfaction ≤ 0) or hit retirement age.
-
-        Retiring heroes:
-          - Gear is returned to guild inventory via unequip_all().
-          - A positive reputation event fires.
-          - Hero is added to state.retired_heroes.
-
-        Abandoned heroes:
-          - Gear is also returned.
-          - No reputation event (quitting isn't the same as retiring).
+        Retiring heroes fire a positive reputation event and are added to
+        state.retired_heroes (which feeds the legacy system).
+        All departing heroes have gear returned to guild inventory.
         """
         messages: List[str] = []
-        remaining: List = []
+        remaining: List     = []
 
         for hero in self.state.roster:
             if getattr(hero, "satisfaction", 50) <= 0:
@@ -234,7 +245,19 @@ class CampaignCycleManager:
                 messages.append(msg)
                 add_market_history_entry(self.state, msg)
 
-                # Positive reputation event for successful retirement.
+                # Check if this retirement unlocks a new legacy milestone.
+                legacy_after = compute_legacy(self.state)
+                hero_class   = getattr(hero, "hero_class", "")
+                old_tier     = 0  # Before this hero retired, tier may have changed.
+                new_tier     = legacy_after.milestone_tier(hero_class)
+                if new_tier > 0:
+                    milestones = legacy_after.active_milestones.get(hero_class, [])
+                    top = max(milestones, key=lambda m: m.tier, default=None)
+                    if top is not None:
+                        messages.append(
+                            f"Legacy milestone unlocked: {hero_class} — {top.label}!"
+                        )
+
                 if reputation is not None:
                     rep_msg = reputation.record_hero_retirement(hero.name)
                     if rep_msg:
@@ -247,8 +270,8 @@ class CampaignCycleManager:
         return messages
 
     def refresh_hiring_market(self) -> List[str]:
-        previous_cycle     = int(getattr(self.state, "market_cycle", 1))
         previous_remaining = len(getattr(self.state, "available_contracts", []))
+        previous_cycle     = int(getattr(self.state, "market_cycle", 1))
 
         refresh_contract_market(self.state)
 

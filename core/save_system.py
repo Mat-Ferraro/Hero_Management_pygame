@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from .game_state import BereavementPayment, GameState
+from .game_state import GameState
 from .manager_reputation import RecentReputation
 from models import Hero, Item
 from systems.campaign.campaign_models import CampaignRuntime
@@ -210,22 +210,6 @@ def reputation_from_dict(data: Dict[str, Any]) -> RecentReputation:
     )
 
 
-# ---------------------------------------------------------------------------
-# BereavementPayment
-# ---------------------------------------------------------------------------
-
-def bereavement_to_dict(payment: BereavementPayment) -> Dict[str, Any]:
-    return {
-        "hero_name": payment.hero_name,
-        "amount": int(payment.amount),
-    }
-
-
-def bereavement_from_dict(data: Dict[str, Any]) -> BereavementPayment:
-    return BereavementPayment(
-        hero_name=data["hero_name"],
-        amount=int(data["amount"]),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -318,10 +302,6 @@ def game_state_to_dict(state: GameState) -> Dict[str, Any]:
         "retired_heroes": [hero_to_dict(hero) for hero in state.retired_heroes],
         "fallen_heroes": [hero_to_dict(hero) for hero in state.fallen_heroes],
         "reputation": reputation_to_dict(state.reputation),
-        "pending_bereavement_payments": [
-            bereavement_to_dict(payment)
-            for payment in state.pending_bereavement_payments
-        ],
         "guild_upgrades": guild_upgrades_to_dict(state.guild_upgrades),
         "rival_guilds": [rival_guild_to_dict(guild) for guild in state.rival_guilds],
         "contract_offers": [contract_offer_to_dict(offer) for offer in state.contract_offers],
@@ -357,10 +337,6 @@ def game_state_from_dict(data: Dict[str, Any]) -> GameState:
         retired_heroes=[hero_from_dict(hero_data) for hero_data in data.get("retired_heroes", [])],
         fallen_heroes=[hero_from_dict(hero_data) for hero_data in data.get("fallen_heroes", [])],
         reputation=reputation_from_dict(data.get("reputation", {})),
-        pending_bereavement_payments=[
-            bereavement_from_dict(payment_data)
-            for payment_data in data.get("pending_bereavement_payments", [])
-        ],
         guild_upgrades=guild_upgrades_from_dict(data.get("guild_upgrades", {})),
         rival_guilds=[rival_guild_from_dict(guild_data) for guild_data in data.get("rival_guilds", [])],
         contract_offers=[

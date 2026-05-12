@@ -3,10 +3,10 @@ pygame_ui/scenes/market_scene.py
 
 Item shop where the guild buys equipment between campaigns.
 
-Updated for new Item schema (v2):
-  - clone_market_item uses category= instead of slot=, copies all new fields.
-  - Row drawers show item.category chip instead of item.slot.
-  - Details panel shows category, tags, drawbacks, and lore.
+Changes from previous version:
+  - refresh_shop() now reads guild_upgrades.market_refresh_discount so the
+    Merchant doctrine upgrade actually reduces the refresh cost at runtime.
+  - The header refresh label shows the discounted price and the saving.
 """
 
 import random
@@ -28,19 +28,19 @@ from pygame_ui.widgets.scrollable_list_panel import ScrollableListPanel
 
 
 class MarketScene(SceneBase):
-    REFRESH_COST = 25
+    BASE_REFRESH_COST = 25
     SHOP_SIZE = 8
 
     def __init__(self, state, on_return_to_hub, on_save_game):
         super().__init__()
 
-        self.state = state
+        self.state            = state
         self.on_return_to_hub = on_return_to_hub
-        self.on_save_game = on_save_game
+        self.on_save_game     = on_save_game
 
-        self.status_message = "Buy equipment for your guild."
+        self.status_message     = "Buy equipment for your guild."
         self.selected_shop_item = None
-        self.shop_items = self.generate_shop_items()
+        self.shop_items         = self.generate_shop_items()
 
         self.details_panel = SelectionDetailsPanel(
             rect=(40, 790, 1840, 230),
@@ -65,6 +65,18 @@ class MarketScene(SceneBase):
             font=self.font, title_font=self.title_font,
             padding=18, title_height=64,
         )
+
+    # ------------------------------------------------------------------
+    # Refresh cost — applies Merchant doctrine discount
+    # ------------------------------------------------------------------
+
+    def refresh_cost(self) -> int:
+        discount = int(getattr(self.state.guild_upgrades, "market_refresh_discount", 0))
+        return max(0, self.BASE_REFRESH_COST - discount)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def sync_lists(self):
         self.shop_panel.set_items(self.shop_items)
@@ -95,7 +107,15 @@ class MarketScene(SceneBase):
         self.draw_details(screen)
         self.update_and_draw_buttons(screen, self.build_buttons())
 
+    # ------------------------------------------------------------------
+    # Header
+    # ------------------------------------------------------------------
+
     def draw_header(self, screen):
+        cost     = self.refresh_cost()
+        discount = int(getattr(self.state.guild_upgrades, "market_refresh_discount", 0))
+        refresh_label = f"{cost}g" if discount == 0 else f"{cost}g (-{discount})"
+
         HeaderPanel(
             rect=(40, 30, 1840, 96), title="Market", stats="",
             status_message=self.status_message,
@@ -107,12 +127,16 @@ class MarketScene(SceneBase):
                 ("Gold",      f"{self.state.gold}g"),
                 ("Shop",      len(self.shop_items)),
                 ("Inventory", len(self.state.inventory)),
-                ("Refresh",   f"{self.REFRESH_COST}g"),
+                ("Refresh",   refresh_label),
             ],
             spacing=220, item_max_width=180, font_size=24,
             label_color=theme.TEXT_MUTED, value_color=theme.TEXT_PRIMARY,
             label_bold=False, value_bold=True,
         ).draw(screen, self.font, 60, 72)
+
+    # ------------------------------------------------------------------
+    # Row drawers
+    # ------------------------------------------------------------------
 
     def draw_shop_row(self, screen, item, row_rect, is_selected, is_hovered):
         draw_selectable_row(screen=screen, rect=row_rect,
@@ -165,6 +189,10 @@ class MarketScene(SceneBase):
             (row_rect.x + 118, row_rect.y + 44),
         )
 
+    # ------------------------------------------------------------------
+    # Details panel
+    # ------------------------------------------------------------------
+
     def draw_details(self, screen):
         if self.selected_shop_item is None:
             self.details_panel.draw(screen=screen, title_font=self.title_font,
@@ -177,7 +205,7 @@ class MarketScene(SceneBase):
 
         self.details_panel.details_panel.panel.draw(screen, self.title_font)
 
-        left_x = self.details_panel.rect.x + 28
+        left_x  = self.details_panel.rect.x + 28
         right_x = self.details_panel.rect.x + 620
         top_y   = self.details_panel.rect.y + 52
 
@@ -216,6 +244,10 @@ class MarketScene(SceneBase):
             label_bold=True, value_bold=False, font_size=22, line_spacing=2,
         ).draw(screen=screen, font=self.font, x=right_x, y=top_y)
 
+    # ------------------------------------------------------------------
+    # Buttons
+    # ------------------------------------------------------------------
+
     def build_buttons(self):
         buttons = [
             hub_button(self.on_return_to_hub),
@@ -224,6 +256,10 @@ class MarketScene(SceneBase):
         if self.selected_shop_item is not None:
             buttons.append(action_button("Buy Item", self.buy_selected_item, rect=(1660, 956, 180, 44)))
         return buttons
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
 
     def handle_row_click(self, pos):
         item = self.shop_panel.item_at_pos(pos)
@@ -259,19 +295,29 @@ class MarketScene(SceneBase):
         self.status_message = f"Purchased {item.name}."
 
     def refresh_shop(self):
-        if self.state.gold < self.REFRESH_COST:
-            self.status_message = f"Not enough gold to refresh. Cost: {self.REFRESH_COST}g."
+        cost = self.refresh_cost()
+
+        if self.state.gold < cost:
+            self.status_message = f"Not enough gold to refresh. Cost: {cost}g."
             return
 
-        self.state.gold -= self.REFRESH_COST
-        self.shop_items = self.generate_shop_items()
+        self.state.gold        -= cost
+        self.shop_items         = self.generate_shop_items()
         self.selected_shop_item = None
         self.sync_lists()
 
         if self.on_save_game:
             self.on_save_game()
 
-        self.status_message = f"Shop refreshed for {self.REFRESH_COST}g."
+        discount = int(getattr(self.state.guild_upgrades, "market_refresh_discount", 0))
+        if discount > 0:
+            self.status_message = f"Shop refreshed for {cost}g (Merchant discount: -{discount}g)."
+        else:
+            self.status_message = f"Shop refreshed for {cost}g."
+
+    # ------------------------------------------------------------------
+    # Item helpers
+    # ------------------------------------------------------------------
 
     def generate_shop_items(self):
         item_pool = load_items()
@@ -280,7 +326,6 @@ class MarketScene(SceneBase):
         return [self.clone_market_item(random.choice(item_pool)) for _ in range(self.SHOP_SIZE)]
 
     def clone_market_item(self, item: Item) -> Item:
-        """Deep-copy an item from the data pool into a fresh Item instance."""
         return Item(
             name=item.name,
             category=item.category,

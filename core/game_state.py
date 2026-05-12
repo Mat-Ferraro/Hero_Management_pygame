@@ -1,3 +1,11 @@
+"""
+core/game_state.py
+
+Central game state dataclass and state-mutation helpers.
+
+Bereavement system removed — it was tracked but never triggered.
+"""
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
@@ -13,12 +21,6 @@ MARKET_STAGE_MAX = 3
 
 
 @dataclass
-class BereavementPayment:
-    hero_name: str
-    amount: int
-
-
-@dataclass
 class GameState:
     expedition: int
     year: int
@@ -31,7 +33,6 @@ class GameState:
     retired_heroes: List[Hero] = field(default_factory=list)
     fallen_heroes: List[Hero] = field(default_factory=list)
     reputation: ManagerReputation = field(default_factory=ManagerReputation)
-    pending_bereavement_payments: List[BereavementPayment] = field(default_factory=list)
     guild_upgrades: GuildUpgrades = field(default_factory=GuildUpgrades)
 
     rival_guilds: List[Dict] = field(default_factory=list)
@@ -103,7 +104,6 @@ def campaign_is_active(state: GameState) -> bool:
     runtime = getattr(state, "campaign_runtime", None)
     if runtime is None:
         return False
-
     return bool(getattr(runtime, "active", False))
 
 
@@ -126,7 +126,6 @@ def stop_campaign_runtime(state: GameState) -> None:
     runtime = getattr(state, "campaign_runtime", None)
     if runtime is None:
         return
-
     runtime.active = False
 
 
@@ -145,7 +144,6 @@ def create_game() -> GameState:
         retired_heroes=[],
         fallen_heroes=[],
         reputation=ManagerReputation(),
-        pending_bereavement_payments=[],
         guild_upgrades=GuildUpgrades(),
         rival_guilds=[],
         contract_offers=[],

@@ -1,3 +1,18 @@
+"""
+systems/campaign/campaign_runtime.py
+
+Campaign runtime — manages task lifecycle, hero dispatch states, and
+campaign tick logic.
+
+Changes from previous version:
+  - complete_task() now awards XP to each participating hero after resolution,
+    scaled by the task's xp_multiplier and the guild's xp_bonus_percent
+    (Scholarly doctrine upgrade).  Previously XP was stored on the task but
+    never actually applied to heroes.
+  - complete_task() now applies guild injury_recovery_bonus (Militant doctrine
+    upgrade) to reduce extra rest time before recording it on the task.
+"""
+
 from __future__ import annotations
 
 import random
@@ -35,6 +50,10 @@ from .task_resolution import resolve_task_outcome_from_chance
 from systems.progression.hero_progression import award_training_points_for_outcome
 
 
+# ---------------------------------------------------------------------------
+# Runtime creation
+# ---------------------------------------------------------------------------
+
 def create_campaign_runtime(
     max_spawns: int = DEFAULT_CAMPAIGN_MAX_SPAWNS,
     initial_spawn_delay: float = DEFAULT_CAMPAIGN_INITIAL_SPAWN_DELAY,
@@ -55,9 +74,17 @@ def create_campaign_runtime(
     )
 
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 def log_event(runtime: CampaignRuntime, message: str) -> None:
     runtime.event_log.append(str(message))
 
+
+# ---------------------------------------------------------------------------
+# Hero state helpers
+# ---------------------------------------------------------------------------
 
 def ensure_hero_states_for_roster(runtime: CampaignRuntime, roster) -> None:
     for hero in roster:
@@ -78,39 +105,37 @@ def clamp_satisfaction(value: int) -> int:
 def apply_hero_satisfaction_delta(hero, delta: int) -> int:
     if hero is None or not hasattr(hero, "satisfaction"):
         return 0
-
     old_value = int(getattr(hero, "satisfaction", 50))
     new_value = clamp_satisfaction(old_value + int(delta))
     setattr(hero, "satisfaction", new_value)
     return new_value - old_value
 
 
+# ---------------------------------------------------------------------------
+# Decision helpers
+# ---------------------------------------------------------------------------
+
 def normalize_decision_choice(choice) -> CampaignDecisionChoice:
     if isinstance(choice, CampaignDecisionChoice):
         return choice
-
     if isinstance(choice, dict):
         return CampaignDecisionChoice.from_dict(choice)
-
-    return CampaignDecisionChoice(
-        id="choice",
-        label=str(choice),
-    )
+    return CampaignDecisionChoice(id="choice", label=str(choice))
 
 
 def iter_decision_choices(event: CampaignDecisionEvent) -> list[CampaignDecisionChoice]:
-    return [normalize_decision_choice(choice) for choice in getattr(event, "choices", []) or []]
+    return [normalize_decision_choice(c) for c in getattr(event, "choices", []) or []]
 
 
-def find_decision_choice(event: CampaignDecisionEvent, choice_id: str) -> Optional[CampaignDecisionChoice]:
+def find_decision_choice(
+    event: CampaignDecisionEvent, choice_id: str
+) -> Optional[CampaignDecisionChoice]:
     choice_id = str(choice_id).strip()
     if not choice_id:
         return None
-
     for choice in iter_decision_choices(event):
         if choice.id == choice_id:
             return choice
-
     return None
 
 
@@ -139,35 +164,40 @@ def apply_choice_reward_modifiers(task, reward_modifiers: dict) -> None:
         task.reward_modifiers["injury_multiplier"] = float(injury_multiplier)
 
 
-def spawn_linked_tasks_from_parent(runtime: CampaignRuntime, parent_task, rng: random.Random) -> int:
+# ---------------------------------------------------------------------------
+# Linked task spawning
+# ---------------------------------------------------------------------------
+
+def spawn_linked_tasks_from_parent(
+    runtime: CampaignRuntime, parent_task, rng: random.Random
+) -> int:
     spawned = build_linked_runtime_tasks(
         runtime=runtime,
         parent_task=parent_task,
         now=runtime.elapsed_time,
         rng=rng,
     )
-
     if not spawned:
         return 0
-
     for task in spawned:
         runtime.active_tasks.append(task)
         log_event(
             runtime,
             f"Follow-up task spawned: {task.task_type} ({task.task_id}) from {parent_task.task_id}.",
         )
-
     parent_task.linked_tasks = []
     return len(spawned)
 
 
+# ---------------------------------------------------------------------------
+# Campaign state checks
+# ---------------------------------------------------------------------------
+
 def runtime_has_live_content(runtime: CampaignRuntime) -> bool:
     if runtime.open_decision_event is not None:
         return True
-
     if any(not task.is_terminal() for task in runtime.active_tasks):
         return True
-
     if any(
         state.state in {
             HERO_STATE_TRAVELING,
@@ -179,7 +209,6 @@ def runtime_has_live_content(runtime: CampaignRuntime) -> bool:
         for state in runtime.hero_states.values()
     ):
         return True
-
     return False
 
 
@@ -189,7 +218,13 @@ def campaign_should_end(runtime: CampaignRuntime) -> bool:
     return not runtime_has_live_content(runtime)
 
 
-def spawn_next_task(runtime: CampaignRuntime, state, rng: random.Random) -> Optional[str]:
+# ---------------------------------------------------------------------------
+# Task spawning
+# ---------------------------------------------------------------------------
+
+def spawn_next_task(
+    runtime: CampaignRuntime, state, rng: random.Random
+) -> Optional[str]:
     if runtime.total_spawns >= runtime.max_spawns:
         return None
 
@@ -213,19 +248,21 @@ def spawn_next_task(runtime: CampaignRuntime, state, rng: random.Random) -> Opti
     return task.task_id
 
 
-def maybe_open_decision_for_task(runtime: CampaignRuntime, task, rng: random.Random) -> bool:
+# ---------------------------------------------------------------------------
+# Decision handling
+# ---------------------------------------------------------------------------
+
+def maybe_open_decision_for_task(
+    runtime: CampaignRuntime, task, rng: random.Random
+) -> bool:
     if runtime.open_decision_event is not None:
         return False
-
     if not bool(getattr(task, "can_trigger_decision", False)):
         return False
 
-    decision_chance = float(getattr(task, "decision_chance", 0.0))
-    decision_chance = max(0.0, min(1.0, decision_chance))
-
+    decision_chance = max(0.0, min(1.0, float(getattr(task, "decision_chance", 0.0))))
     if decision_chance <= 0.0:
         return False
-
     if rng.random() > decision_chance:
         return False
 
@@ -240,7 +277,7 @@ def maybe_open_decision_for_task(runtime: CampaignRuntime, task, rng: random.Ran
         )
         or []
     )
-    normalized_choices = [normalize_decision_choice(choice) for choice in raw_choices]
+    normalized_choices = [normalize_decision_choice(c) for c in raw_choices]
 
     runtime.open_decision_event = CampaignDecisionEvent(
         task_id=task.task_id,
@@ -271,13 +308,13 @@ def maybe_open_decision_for_task(runtime: CampaignRuntime, task, rng: random.Ran
 
 
 def begin_task_execution(runtime: CampaignRuntime, task) -> None:
-    task.state = TASK_STATE_ACTIVE
+    task.state      = TASK_STATE_ACTIVE
     task.started_at = runtime.elapsed_time
     task.active_until = runtime.elapsed_time + float(task.task_duration)
 
     for hero_name in task.assigned_heroes:
         hero_state = get_or_create_hero_dispatch_state(runtime, hero_name)
-        hero_state.state = HERO_STATE_ON_TASK
+        hero_state.state           = HERO_STATE_ON_TASK
         hero_state.current_task_id = task.task_id
 
     log_event(
@@ -308,9 +345,9 @@ def resolve_open_decision(runtime: CampaignRuntime, choice_id: str) -> str:
 
     if choice.id == "push":
         task.task_duration = max(4.0, float(task.task_duration) * 0.85)
-        task.reward_xp = int(float(task.reward_xp) * 1.10)
+        task.reward_xp     = int(float(task.reward_xp) * 1.10)
     elif choice.id == "safe":
-        task.task_duration = float(task.task_duration) * 1.10
+        task.task_duration  = float(task.task_duration) * 1.10
         task.reward_gold_max = int(float(task.reward_gold_max) * 1.05)
 
     runtime.open_decision_event = None
@@ -321,7 +358,13 @@ def resolve_open_decision(runtime: CampaignRuntime, choice_id: str) -> str:
     return f"Resolved decision for {task.task_id}."
 
 
-def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> None:
+# ---------------------------------------------------------------------------
+# Task completion
+# ---------------------------------------------------------------------------
+
+def complete_task(
+    runtime: CampaignRuntime, state, task, rng: random.Random
+) -> None:
     heroes = []
     for hero_name in task.assigned_heroes:
         hero = find_hero_by_name(state, hero_name)
@@ -331,33 +374,43 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
     roll_value = rng.random()
     result = resolve_task_outcome_from_chance(task, heroes, roll_value=roll_value)
 
-    task.success_chance = float(result["success_chance"])
-    task.coverage_ratio = float(result["fit_score"])
-    task.outcome_band = str(result["outcome_band"])
+    task.success_chance   = float(result["success_chance"])
+    task.coverage_ratio   = float(result["fit_score"])
+    task.outcome_band     = str(result["outcome_band"])
     task.payout_multiplier = float(result["payout_multiplier"])
-    task.xp_multiplier = float(result["xp_multiplier"])
+    task.xp_multiplier    = float(result["xp_multiplier"])
 
+    # Gold reward.
     injury_multiplier = float(task.reward_modifiers.get("injury_multiplier", 1.0))
-    reward_floor = int(round(float(task.reward_gold_min) * task.payout_multiplier))
-    reward_ceiling = int(round(float(task.reward_gold_max) * task.payout_multiplier))
-    reward_floor = max(0, reward_floor)
-    reward_ceiling = max(reward_floor, reward_ceiling)
-
+    reward_floor   = max(0, int(round(float(task.reward_gold_min) * task.payout_multiplier)))
+    reward_ceiling = max(reward_floor, int(round(float(task.reward_gold_max) * task.payout_multiplier)))
     gold_reward = rng.randint(reward_floor, reward_ceiling) if reward_ceiling > 0 else 0
     state.gold += gold_reward
 
-    task.injured_heroes = []
-    task.injury_rest_by_hero = {}
+    task.injured_heroes          = []
+    task.injury_rest_by_hero     = {}
     task.satisfaction_delta_by_hero = {}
     task.training_points_by_hero = {}
-    task.consequence_summary = []
+    task.consequence_summary     = []
 
-    injury_profile = result["injury_profile"]
-    adjusted_injury_chance = max(0.0, min(1.0, float(injury_profile["injury_chance"]) * injury_multiplier))
+    injury_profile          = result["injury_profile"]
+    adjusted_injury_chance  = max(0.0, min(1.0, float(injury_profile["injury_chance"]) * injury_multiplier))
     base_satisfaction_delta = int(result["satisfaction_delta"])
 
+    # Guild upgrade bonuses + legacy bonuses — stacked inside the hero loop.
+    guild_upgrades = getattr(state, "guild_upgrades", None)
+
+    try:
+        from systems.guild.retirement_legacy import compute_legacy
+        _legacy        = compute_legacy(state)
+        xp_bonus_pct   = int(getattr(guild_upgrades, "xp_bonus_percent",    0) if guild_upgrades else 0)                          + int(getattr(_legacy, "total_xp_bonus_percent",   0))
+        recovery_bonus = int(getattr(guild_upgrades, "injury_recovery_bonus", 0) if guild_upgrades else 0)                          + int(getattr(_legacy, "total_injury_recovery",     0))
+    except Exception:
+        xp_bonus_pct   = int(getattr(guild_upgrades, "xp_bonus_percent",    0)) if guild_upgrades else 0
+        recovery_bonus = int(getattr(guild_upgrades, "injury_recovery_bonus", 0)) if guild_upgrades else 0
+
     for hero in heroes:
-        hero_name = hero.name
+        hero_name  = hero.name
         injury_roll = rng.random()
 
         extra_rest = 0.0
@@ -367,6 +420,11 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
                 float(injury_profile["extra_rest_max"]),
             )
             extra_rest = round(extra_rest, 1)
+
+            # Militant doctrine reduces injury rest time.
+            if recovery_bonus > 0:
+                extra_rest = max(0.0, extra_rest - float(recovery_bonus))
+
             task.injured_heroes.append(hero_name)
             task.injury_rest_by_hero[hero_name] = extra_rest
 
@@ -378,6 +436,14 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
             awarded = 2 if task.outcome_band == "great_success" else 1
             task.training_points_by_hero[hero_name] = awarded
 
+        # Award mission XP to the hero — previously this was never applied.
+        base_xp = max(0, int(float(task.reward_xp) * task.xp_multiplier))
+        if base_xp > 0:
+            total_xp = int(base_xp * (1.0 + xp_bonus_pct / 100.0))
+            hero.add_xp(total_xp)
+            task.consequence_summary.append(f"{hero_name} earned {total_xp} XP.")
+
+    # Consequence log.
     task.consequence_summary.append(f"Success chance was {task.success_chance:.0%}.")
 
     ability_notes = list(result.get("ability_modifiers", {}).get("notes", []))
@@ -385,7 +451,9 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         task.consequence_summary.append(line)
 
     if task.branch_flags:
-        task.consequence_summary.append(f"Branch flags: {', '.join(sorted(task.branch_flags.keys()))}.")
+        task.consequence_summary.append(
+            f"Branch flags: {', '.join(sorted(task.branch_flags.keys()))}."
+        )
 
     if gold_reward > 0:
         task.consequence_summary.append(f"Guild earned {gold_reward}g.")
@@ -393,7 +461,9 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
     if task.injured_heroes:
         for hero_name in task.injured_heroes:
             rest_time = task.injury_rest_by_hero.get(hero_name, 0.0)
-            task.consequence_summary.append(f"{hero_name} was injured and needs +{rest_time:.0f}s rest.")
+            task.consequence_summary.append(
+                f"{hero_name} was injured and needs +{rest_time:.0f}s rest."
+            )
     else:
         task.consequence_summary.append("No injuries reported.")
 
@@ -407,7 +477,7 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         if amount > 0:
             task.consequence_summary.append(f"{hero_name} gained {amount} training point(s).")
 
-    task.state = TASK_STATE_AWAITING_ACK
+    task.state        = TASK_STATE_AWAITING_ACK
     task.completed_at = runtime.elapsed_time
     task.active_until = None
     task.outcome_summary = (
@@ -422,20 +492,22 @@ def complete_task(runtime: CampaignRuntime, state, task, rng: random.Random) -> 
         f"Task resolved: {task.task_type} ({task.task_id}) | "
         f"{task.outcome_summary} | awaiting acknowledgment",
     )
-
     for summary_line in task.consequence_summary:
         log_event(runtime, f" - {summary_line}")
 
+
+# ---------------------------------------------------------------------------
+# Task acknowledgment
+# ---------------------------------------------------------------------------
 
 def acknowledge_completed_task(runtime: CampaignRuntime, task_id: str) -> str:
     task = find_task(runtime, task_id)
     if task is None:
         return "Task not found."
-
     if task.state != TASK_STATE_AWAITING_ACK:
         return "Task is not awaiting acknowledgment."
 
-    task.state = TASK_STATE_COMPLETED
+    task.state          = TASK_STATE_COMPLETED
     task.acknowledged_at = runtime.elapsed_time
 
     if task.task_id not in runtime.completed_task_ids:
@@ -449,9 +521,9 @@ def acknowledge_completed_task(runtime: CampaignRuntime, task_id: str) -> str:
 
 
 def fail_task_and_return_party(runtime: CampaignRuntime, task) -> None:
-    task.state = TASK_STATE_FAILED
-    task.completed_at = runtime.elapsed_time
-    task.active_until = None
+    task.state          = TASK_STATE_FAILED
+    task.completed_at   = runtime.elapsed_time
+    task.active_until   = None
     task.outcome_summary = "Failed"
 
     for hero_name in task.assigned_heroes:
@@ -459,6 +531,10 @@ def fail_task_and_return_party(runtime: CampaignRuntime, task) -> None:
 
     log_event(runtime, f"Task failed: {task.task_type} ({task.task_id}). Heroes are returning.")
 
+
+# ---------------------------------------------------------------------------
+# Tick update functions
+# ---------------------------------------------------------------------------
 
 def update_pending_task_expirations(runtime: CampaignRuntime) -> None:
     for task in runtime.active_tasks:
@@ -475,7 +551,6 @@ def update_traveling_tasks(runtime: CampaignRuntime, rng: random.Random) -> None
             continue
 
         all_arrived = True
-
         for hero_name in task.assigned_heroes:
             hero_state = get_or_create_hero_dispatch_state(runtime, hero_name)
             if hero_state.travel_end_time is None or runtime.elapsed_time < hero_state.travel_end_time:
@@ -495,11 +570,9 @@ def update_active_tasks(runtime: CampaignRuntime, state, rng: random.Random) -> 
     for task in runtime.active_tasks:
         if task.state != TASK_STATE_ACTIVE:
             continue
-
         if task.active_until is None:
             log_event(runtime, f"WARNING: active task {task.task_id} has no active_until.")
             continue
-
         if runtime.elapsed_time >= task.active_until:
             complete_task(runtime, state, task, rng)
 
@@ -507,15 +580,15 @@ def update_active_tasks(runtime: CampaignRuntime, state, rng: random.Random) -> 
 def update_hero_return_and_rest(runtime: CampaignRuntime) -> None:
     for hero_name, hero_state in runtime.hero_states.items():
         if hero_state.state == HERO_STATE_RETURNING:
-            if hero_state.return_end_time is not None and runtime.elapsed_time >= hero_state.return_end_time:
+            if (
+                hero_state.return_end_time is not None
+                and runtime.elapsed_time >= hero_state.return_end_time
+            ):
                 related_task_id = hero_state.current_task_id or hero_state.assigned_task_id
-                related_task = find_task(runtime, related_task_id) if related_task_id else None
+                related_task    = find_task(runtime, related_task_id) if related_task_id else None
 
-                extra_rest = 0.0
-                if related_task is not None:
-                    extra_rest = float(related_task.injury_rest_by_hero.get(hero_name, 0.0))
-
-                base_rest = float(related_task.rest_duration) if related_task is not None else 14.0
+                extra_rest  = float(related_task.injury_rest_by_hero.get(hero_name, 0.0)) if related_task else 0.0
+                base_rest   = float(related_task.rest_duration) if related_task else 14.0
                 rest_duration = base_rest + extra_rest
 
                 start_hero_rest(runtime, hero_name, runtime.elapsed_time, rest_duration)
@@ -534,12 +607,14 @@ def update_hero_return_and_rest(runtime: CampaignRuntime) -> None:
 def maybe_spawn_task(runtime: CampaignRuntime, state, rng: random.Random) -> None:
     if runtime.total_spawns >= runtime.max_spawns:
         return
-
     if runtime.elapsed_time < runtime.next_spawn_time:
         return
-
     spawn_next_task(runtime, state, rng)
 
+
+# ---------------------------------------------------------------------------
+# Main tick
+# ---------------------------------------------------------------------------
 
 def tick_campaign_runtime(
     runtime: CampaignRuntime,
@@ -549,10 +624,8 @@ def tick_campaign_runtime(
 ) -> None:
     if runtime is None:
         return
-
     if not getattr(runtime, "active", False):
         return
-
     if getattr(runtime, "paused", False):
         return
 

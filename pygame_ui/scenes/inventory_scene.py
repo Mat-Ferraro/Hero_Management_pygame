@@ -3,13 +3,10 @@ pygame_ui/scenes/inventory_scene.py
 
 Inventory and equipment management scene.
 
-Changes from previous version:
-  - Equip/unequip routed through systems.equipment.equipment_rules
-    (enforces category slots, capacity limits, class restrictions).
-  - Hero rows show capacity (used/total slots) and synergy indicator.
-  - Details panel shows tags, drawbacks, capacity cost, and active synergies.
-  - Item rows show category label instead of old free-string slot.
-  - Consumables flagged visually; equip button hidden for them.
+Changes:
+  - "Sell Item" button: sells selected unequipped item for 50% of base value.
+    Equipped items cannot be sold — unequip first.
+  - Sell price shown on item row chip and in details panel.
 """
 
 from pygame_ui import theme
@@ -37,17 +34,24 @@ from systems.equipment.equipment_synergies import (
 )
 
 
+SELL_MULTIPLIER = 0.50
+
+
+def sell_price(item) -> int:
+    return max(1, int(item.value * SELL_MULTIPLIER))
+
+
 class InventoryScene(SceneBase):
     def __init__(self, state, on_return_to_hub, on_save_game):
         super().__init__()
 
-        self.state = state
+        self.state            = state
         self.on_return_to_hub = on_return_to_hub
-        self.on_save_game = on_save_game
+        self.on_save_game     = on_save_game
 
-        self.status_message = "Select an item and a hero."
-        self.selected_item = None
-        self.selected_hero = None
+        self.status_message              = "Select an item and a hero."
+        self.selected_item               = None
+        self.selected_hero               = None
         self.selected_equipment_category = None
 
         self.details_panel = SelectionDetailsPanel(
@@ -80,8 +84,8 @@ class InventoryScene(SceneBase):
 
     def handle_event(self, event):
         self.sync_lists()
-        if self.items_panel.handle_event(event): return
-        if self.heroes_panel.handle_event(event): return
+        if self.items_panel.handle_event(event):     return
+        if self.heroes_panel.handle_event(event):    return
         if self.equipment_panel.handle_event(event): return
         if self.handle_buttons_click(event, self.build_buttons()): return
         if self.is_left_click(event): self._handle_row_click(event.pos)
@@ -98,9 +102,11 @@ class InventoryScene(SceneBase):
         self.clear_screen(screen)
         self._draw_header(screen)
         self.items_panel.draw(screen=screen, row_drawer=self._draw_item_row,
-                              selected_item=self.selected_item, empty_text="No items in guild inventory.")
+                              selected_item=self.selected_item,
+                              empty_text="No items in guild inventory.")
         self.heroes_panel.draw(screen=screen, row_drawer=self._draw_hero_row,
-                               selected_item=self.selected_hero, empty_text="No heroes hired yet.")
+                               selected_item=self.selected_hero,
+                               empty_text="No heroes hired yet.")
         self.equipment_panel.draw(screen=screen, row_drawer=self._draw_equipment_row,
                                   selected_item=self._selected_equipment_row(),
                                   empty_text=self._equipment_empty_text())
@@ -110,7 +116,8 @@ class InventoryScene(SceneBase):
     def _draw_header(self, screen):
         HeaderPanel(
             rect=(40, 30, 1840, 96), title="Inventory", stats="",
-            status_message=self.status_message, stats_pos=(70, 70), status_pos=(1080, 108),
+            status_message=self.status_message,
+            stats_pos=(70, 70), status_pos=(1080, 108),
         ).draw(screen, self.title_font, self.header_font, self.font)
         ResourceHeader(
             resources=[
@@ -133,8 +140,9 @@ class InventoryScene(SceneBase):
                 True, theme.TEXT_PRIMARY,
             ), (row_rect.x + 14, row_rect.y + 10),
         )
-        StatusChip(rect=(row_rect.right - 106, row_rect.y + 10, 90, 26),
-                   text=f"{item.value}g",
+        sp = sell_price(item)
+        StatusChip(rect=(row_rect.right - 112, row_rect.y + 10, 96, 26),
+                   text=f"{sp}g sell",
                    style="warning" if item.value >= 250 else "good").draw(screen, self.small_font)
         cat_label = "CONSUMABLE" if item.consumable else item.category
         cat_style = "danger" if item.consumable else "info"
@@ -143,7 +151,7 @@ class InventoryScene(SceneBase):
         TextBlock(lines=[self._item_bonus_summary(item)], color=theme.TEXT_MUTED,
                   row_spacing=18, max_lines=1).draw(
             screen=screen, font=self.small_font,
-            x=row_rect.x + 136, y=row_rect.y + 45, max_width=row_rect.width - 158)
+            x=row_rect.x + 136, y=row_rect.y + 45, max_width=row_rect.width - 260)
 
     def _draw_hero_row(self, screen, hero, row_rect, is_selected, is_hovered):
         can_eq = True
@@ -152,7 +160,8 @@ class InventoryScene(SceneBase):
             can_eq = ok
 
         draw_selectable_row(screen=screen, rect=row_rect, is_selected=is_selected,
-                            is_hovered=is_hovered, style="green" if can_eq else "dark")
+                            is_hovered=is_hovered,
+                            style="green" if can_eq else "dark")
 
         name_color   = (210, 240, 210) if can_eq else theme.TEXT_MUTED
         detail_color = (180, 210, 180) if can_eq else (145, 145, 155)
@@ -168,7 +177,7 @@ class InventoryScene(SceneBase):
 
         if self.selected_item and not self.selected_item.consumable:
             elig_text  = "Eligible" if can_eq else "Cannot Equip"
-            elig_style = "good" if can_eq else "danger"
+            elig_style = "good"     if can_eq else "danger"
         else:
             elig_text  = hero.health_status()
             elig_style = self._health_chip_style(hero)
@@ -209,11 +218,13 @@ class InventoryScene(SceneBase):
         top_y   = self.details_panel.rect.y + 52
 
         if detail_item is not None:
+            in_inventory = detail_item in self.state.inventory
             rows = [
                 ("Item",     detail_item.name),
                 ("Category", detail_item.category),
                 ("Rarity",   detail_item.rarity),
                 ("Value",    f"{detail_item.value}g"),
+                ("Sell For", f"{sell_price(detail_item)}g (50%)"),
                 ("Classes",  ", ".join(detail_item.class_restrictions) if detail_item.class_restrictions else "Any"),
                 ("Tags",     detail_item.tag_list_display()),
                 ("Bonuses",  self._item_bonus_summary(detail_item)),
@@ -229,6 +240,8 @@ class InventoryScene(SceneBase):
             if self.selected_hero:
                 ok, reason = can_equip(self.selected_hero, detail_item)
                 rows.append(("Can equip", "Yes" if ok else f"No — {reason}"))
+            if not in_inventory:
+                rows.append(("Note", "Equipped — unequip before selling."))
 
             KeyValueGrid(rows=rows, columns=1, column_width=520, row_gap=10,
                          label_color=theme.TEXT_MUTED, value_color=theme.TEXT_PRIMARY,
@@ -240,9 +253,9 @@ class InventoryScene(SceneBase):
 
         if self.selected_hero is not None:
             hero = self.selected_hero
-            syn_lines = synergy_summary_lines(hero)
-            syn_text  = "; ".join(syn_lines) if syn_lines else "None active"
-            loadout   = loadout_summary(hero)
+            syn_lines    = synergy_summary_lines(hero)
+            syn_text     = "; ".join(syn_lines) if syn_lines else "None active"
+            loadout      = loadout_summary(hero)
             loadout_text = " | ".join(f"{c}: {n}" for c, n in loadout.items())
 
             KeyValueGrid(
@@ -268,33 +281,48 @@ class InventoryScene(SceneBase):
 
     def build_buttons(self):
         buttons = [hub_button(self.on_return_to_hub)]
+
+        # Equip — only when item selected, hero selected, and item is equippable.
         if self.selected_item and self.selected_hero and not self.selected_item.consumable:
             ok, _ = can_equip(self.selected_hero, self.selected_item)
             if ok:
-                buttons.append(action_button("Equip Item", self._equip_selected, rect=(1660, 956, 180, 44)))
+                buttons.append(action_button("Equip Item", self._equip_selected,
+                                             rect=(1460, 956, 180, 44)))
+
+        # Unequip — only when a loadout slot is selected.
         if self.selected_hero and self.selected_equipment_category:
-            buttons.append(action_button("Unequip", self._unequip_selected, rect=(1460, 956, 180, 44)))
+            buttons.append(action_button("Unequip", self._unequip_selected,
+                                         rect=(1260, 956, 180, 44)))
+
+        # Sell — only for items actually in guild inventory (not equipped).
+        if self.selected_item and self.selected_item in self.state.inventory:
+            sp = sell_price(self.selected_item)
+            buttons.append(action_button(f"Sell ({sp}g)", self._sell_selected,
+                                         rect=(1660, 956, 180, 44)))
+
         return buttons
 
     def _handle_row_click(self, pos):
         item = self.items_panel.item_at_pos(pos)
         if item is not None:
-            self.selected_item = item
+            self.selected_item               = item
             self.selected_equipment_category = None
             self.status_message = f"Selected: {item.name} [{item.category}]"
             return
+
         hero = self.heroes_panel.item_at_pos(pos)
         if hero is not None:
-            self.selected_hero = hero
+            self.selected_hero               = hero
             self.selected_equipment_category = None
             self.status_message = f"Selected hero: {hero.name}"
             self.sync_lists()
             return
+
         eq_row = self.equipment_panel.item_at_pos(pos)
         if eq_row is not None:
             category, item = eq_row
             self.selected_equipment_category = category
-            self.selected_item = None
+            self.selected_item               = None
             self.status_message = f"Selected equipped: {item.name} ({category})"
 
     def _equip_selected(self):
@@ -312,25 +340,42 @@ class InventoryScene(SceneBase):
         if not self.selected_hero or not self.selected_equipment_category:
             self.status_message = "Select an equipped item to unequip."
             return
-        result = unequip_item(self.selected_hero, self.selected_equipment_category, self.state.inventory)
+        result = unequip_item(self.selected_hero, self.selected_equipment_category,
+                              self.state.inventory)
         self.status_message = result.message
         if result.success:
             self.selected_equipment_category = None
             self.sync_lists()
             if self.on_save_game: self.on_save_game()
 
+    def _sell_selected(self):
+        item = self.selected_item
+        if item is None or item not in self.state.inventory:
+            self.status_message = "Select an item from inventory to sell."
+            return
+        sp = sell_price(item)
+        self.state.gold += sp
+        self.state.inventory.remove(item)
+        self.selected_item = None
+        self.sync_lists()
+        if self.on_save_game: self.on_save_game()
+        self.status_message = f"Sold {item.name} for {sp}g."
+
     def _hero_equipment_rows(self):
         if self.selected_hero is None: return []
         return list(self.selected_hero.equipment.items())
 
     def _selected_equipment_row(self):
-        if self.selected_hero is None or self.selected_equipment_category is None: return None
+        if self.selected_hero is None or self.selected_equipment_category is None:
+            return None
         for row in self._hero_equipment_rows():
-            if row[0] == self.selected_equipment_category: return row
+            if row[0] == self.selected_equipment_category:
+                return row
         return None
 
     def _equipment_empty_text(self):
-        if self.selected_hero is None: return "Select a hero to view their loadout."
+        if self.selected_hero is None:
+            return "Select a hero to view their loadout."
         return f"{self.selected_hero.name} has no equipped items."
 
     def _total_equipped(self):
@@ -345,8 +390,12 @@ class InventoryScene(SceneBase):
     def _item_bonus_summary(self, item):
         if item is None: return "No item selected"
         parts = []
-        for stat, value in item.stat_bonuses.items(): parts.append(f"+{value} {stat}")
-        for damage, value in item.damage_type_bonus.items(): parts.append(f"+{int(value * 100)}% {damage} dmg")
-        for enemy, value in item.enemy_type_bonus.items(): parts.append(f"+{int(value * 100)}% vs {enemy}")
-        for enemy, value in item.enemy_type_resistance.items(): parts.append(f"-{int(value * 100)}% from {enemy}")
+        for stat, value in item.stat_bonuses.items():
+            parts.append(f"+{value} {stat}")
+        for damage, value in item.damage_type_bonus.items():
+            parts.append(f"+{int(value * 100)}% {damage} dmg")
+        for enemy, value in item.enemy_type_bonus.items():
+            parts.append(f"+{int(value * 100)}% vs {enemy}")
+        for enemy, value in item.enemy_type_resistance.items():
+            parts.append(f"-{int(value * 100)}% from {enemy}")
         return "; ".join(parts) if parts else "No bonuses"

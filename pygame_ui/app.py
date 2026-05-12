@@ -36,6 +36,7 @@ from pygame_ui.scenes.management_scene import ManagementScene
 from pygame_ui.scenes.market_scene import MarketScene
 from pygame_ui.scenes.mission_assignment_scene import MissionAssignmentScene
 from pygame_ui.scenes.rival_guilds_scene import RivalGuildsScene
+from pygame_ui.scenes.legacy_scene import LegacyScene
 from pygame_ui.scenes.training_scene import TrainingScene
 
 
@@ -104,6 +105,7 @@ class App:
             on_open_training=self.show_training,
             on_open_upgrades=self.show_guild_upgrades,
             on_open_rivals=self.show_rival_guilds,
+            on_open_legacy=self.show_legacy,
             on_save_game=self.save_current_game,
             on_return_to_menu=self.show_main_menu,
             status_message=status_message,
@@ -167,6 +169,12 @@ class App:
             state=self.state,
             on_return_to_hub=self.show_game_hub,
             on_save_game=self.save_current_game,
+        )
+
+    def show_legacy(self):
+        self.scene = LegacyScene(
+            state=self.state,
+            on_return_to_hub=self.show_game_hub,
         )
 
     def show_guild_upgrades(self):
